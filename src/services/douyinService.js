@@ -7,6 +7,11 @@ const MAX_TOP_LEVEL_COMMENTS = 400;
 const COMMENT_PAGE_SIZE = 20;
 const REPLY_PROBE_TIMEOUT_MS = 6000;
 
+/// Trích video ID từ các dạng link Douyin:
+/// - douyin.com/video/<id>
+/// - douyin.com/jingxuan?modal_id=<id>
+/// - iesdouyin.com/share/video/<id>/
+/// - v.douyin.com/<shortcode> (cần resolve redirect trước)
 function ExtractVideoId(videoUrl)
 {
     const parsedUrl = new URL(videoUrl);
@@ -18,7 +23,44 @@ function ExtractVideoId(videoUrl)
     }
 
     const pathSegments = parsedUrl.pathname.split("/").filter(Boolean);
+    const videoSegmentIndex = pathSegments.indexOf("video");
+
+    if (videoSegmentIndex !== -1 && pathSegments[videoSegmentIndex + 1])
+    {
+        return pathSegments[videoSegmentIndex + 1];
+    }
+
     return pathSegments.at(-1) ?? "";
+}
+
+/// Resolve link ngắn v.douyin.com bằng cách follow redirect.
+async function ResolveShortUrlAsync(videoUrl)
+{
+    const parsedUrl = new URL(videoUrl);
+
+    if (parsedUrl.hostname !== "v.douyin.com")
+    {
+        return videoUrl;
+    }
+
+    try
+    {
+        const response = await fetch(videoUrl,
+        {
+            method: "GET",
+            redirect: "follow",
+            headers:
+            {
+                "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36",
+            },
+        });
+
+        return response.url || videoUrl;
+    }
+    catch
+    {
+        return videoUrl;
+    }
 }
 
 function BuildCanonicalVideoUrl(videoUrl)
@@ -333,8 +375,9 @@ export class DouyinService
         });
 
         const page = await context.newPage();
-        const videoId = ExtractVideoId(videoUrl);
-        const canonicalVideoUrl = BuildCanonicalVideoUrl(videoUrl);
+        const resolvedUrl = await ResolveShortUrlAsync(videoUrl);
+        const videoId = ExtractVideoId(resolvedUrl);
+        const canonicalVideoUrl = BuildCanonicalVideoUrl(resolvedUrl);
 
         try
         {
