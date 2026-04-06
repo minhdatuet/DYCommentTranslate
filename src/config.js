@@ -1,0 +1,20 @@
+import path from "node:path";
+import process from "node:process";
+
+import dotenv from "dotenv";
+
+dotenv.config();
+
+const DEFAULT_DICT_DIR = "D:\\Novel\\convert-etx";
+const DEFAULT_STV_API_URL = "https://comic.sangtacvietcdn.xyz/tsm.php?cdn=";
+
+export const config =
+{
+    port: Number(process.env.PORT ?? 3000),
+    geminiApiKey: process.env.GEMINI_API_KEY ?? "",
+    geminiModel: process.env.GEMINI_MODEL ?? "gemini-2.5-flash",
+    stvApiUrl: process.env.STV_API_URL ?? DEFAULT_STV_API_URL,
+    offlineDictDir: process.env.OFFLINE_DICT_DIR ?? DEFAULT_DICT_DIR,
+    playwrightHeadless: (process.env.PLAYWRIGHT_HEADLESS ?? "true").toLowerCase() !== "false",
+    publicDir: path.resolve("public"),
+};

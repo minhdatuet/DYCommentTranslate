@@ -1,0 +1,65 @@
+<!DOCTYPE html>
+<html lang="vi">
+<head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>DYComment</title>
+    <link rel="stylesheet" href="/styles.css" />
+</head>
+<body>
+    <main class="page-shell">
+        <section class="hero-panel">
+            <p class="eyebrow">Douyin Comment Translator</p>
+            <h1>Nhập link Douyin, kéo comment tiếng Trung và dịch sang tiếng Việt.</h1>
+            <p class="hero-copy">
+                Hỗ trợ 3 chế độ dịch: SangTacViet API, Gemini API, hoặc từ điển offline.
+            </p>
+        </section>
+
+        <section class="tool-panel">
+            <form id="commentForm" class="tool-form">
+                <label class="field-block" for="videoUrl">
+                    <span>Link video Douyin</span>
+                    <input
+                        id="videoUrl"
+                        name="videoUrl"
+                        type="url"
+                        required
+                        value="https://www.douyin.com/jingxuan?modal_id=7623466763384016163"
+                        placeholder="https://www.douyin.com/..."
+                    />
+                </label>
+
+                <label class="field-block" for="translationMode">
+                    <span>Chế độ dịch</span>
+                    <select id="translationMode" name="translationMode">
+                        <option value="stv" selected>SangTacViet API</option>
+                        <option value="offline">Offline dictionary</option>
+                        <option value="gemini">Gemini API</option>
+                    </select>
+                </label>
+
+                <button id="submitButton" type="submit">Lấy comment</button>
+            </form>
+
+            <div id="statusBox" class="status-box idle">Sẵn sàng.</div>
+        </section>
+
+        <section class="result-panel">
+            <div class="result-header">
+                <div>
+                    <p class="result-label">Kết quả</p>
+                    <h2 id="resultTitle">Chưa có dữ liệu</h2>
+                </div>
+                <div id="resultMeta" class="result-meta"></div>
+            </div>
+
+            <div id="commentList" class="comment-list empty">
+                Chưa tải comment.
+            </div>
+        </section>
+    </main>
+
+    <script type="module" src="/app.js"></script>
+</body>
+</html>
