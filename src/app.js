@@ -80,7 +80,9 @@ app.post("/api/comments", async (request, response) =>
                 translationMode,
             );
 
-            const hasMore = cached.douyinHasMore || (limit > 0 && (offset + limit) < cached.comments.length);
+            const endIndex = limit > 0 ? offset + limit : cached.comments.length;
+            const hasMore = slicedComments.length > 0
+                && (cached.douyinHasMore || endIndex < cached.comments.length);
 
             response.json(
             {
@@ -138,7 +140,8 @@ app.post("/api/comments", async (request, response) =>
             translationMode,
         );
 
-        const hasMore = result.douyinHasMore || trimmedComments.length < result.comments.length;
+        const hasMore = trimmedComments.length > 0
+            && (result.douyinHasMore || trimmedComments.length < result.comments.length);
 
         response.json(
         {
