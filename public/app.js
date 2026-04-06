@@ -4,6 +4,7 @@ const statusBox = document.getElementById("statusBox");
 const resultTitle = document.getElementById("resultTitle");
 const resultMeta = document.getElementById("resultMeta");
 const commentList = document.getElementById("commentList");
+const API_REQUEST_TIMEOUT_MS = 120000;
 
 // State cho pagination
 let currentVideoUrl = "";
@@ -137,15 +138,41 @@ function AppendComments(payload)
 
 async function FetchComments(videoUrl, translationMode, limit, offset)
 {
-    const response = await fetch("/api/comments",
+    const controller = new AbortController();
+    const timeoutId = setTimeout(() =>
     {
-        method: "POST",
-        headers:
+        controller.abort();
+    }, API_REQUEST_TIMEOUT_MS);
+
+    let response;
+
+    try
+    {
+        response = await fetch("/api/comments",
         {
-            "Content-Type": "application/json",
-        },
-        body: JSON.stringify({ videoUrl, translationMode, limit, offset }),
-    });
+            method: "POST",
+            headers:
+            {
+                "Content-Type": "application/json",
+            },
+            body: JSON.stringify({ videoUrl, translationMode, limit, offset }),
+            signal: controller.signal,
+        });
+    }
+    catch (error)
+    {
+        if (error instanceof DOMException && error.name === "AbortError")
+        {
+            throw new Error("Yêu cầu lấy comment bị quá thời gian chờ.");
+        }
+
+        throw error;
+    }
+    finally
+    {
+        clearTimeout(timeoutId);
+    }
+
     const responseJson = await response.json();
 
     if (!response.ok || !responseJson.ok)
@@ -243,7 +270,7 @@ commentForm.addEventListener("submit", async (event) =>
         commentList.textContent = error instanceof Error ? error.message : "Lỗi không xác định.";
         resultTitle.textContent = "Không tải được dữ liệu";
         resultMeta.innerHTML = "";
-        SetStatus("Yêu cầu thất bại.", "error");
+        SetStatus(error instanceof Error ? error.message : "Yêu cầu thất bại.", "error");
     }
     finally
     {

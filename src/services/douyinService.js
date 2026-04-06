@@ -7,6 +7,8 @@ const COMMENT_LIST_PATH = "/aweme/v1/web/comment/list/";
 const COMMENT_REPLY_LIST_PATH = "/aweme/v1/web/comment/list/reply/";
 const MAX_TOP_LEVEL_COMMENTS = 400;
 const COMMENT_PAGE_SIZE = 20;
+const COMMENT_STEP_TIMEOUT_MS = 30000;
+const GET_COMMENTS_TIMEOUT_MS = 90000;
 const REPLY_PROBE_TIMEOUT_MS = 6000;
 const DOUYIN_CLIENT_READY_TIMEOUT_MS = 15000;
 
@@ -91,6 +93,20 @@ function NormalizeTopLevelComment(comment, index)
         createTime: comment.createTime ?? comment.create_time ?? 0,
         replies: [],
     };
+}
+
+function WithTimeoutAsync(promise, timeoutMs, errorMessage)
+{
+    return Promise.race([
+        promise,
+        new Promise((_, reject) =>
+        {
+            setTimeout(() =>
+            {
+                reject(new Error(errorMessage));
+            }, timeoutMs);
+        }),
+    ]);
 }
 
 async function WaitForDouyinClientReadyAsync(page, commentApiBootstrap)
@@ -659,22 +675,47 @@ export class DouyinService
 
         try
         {
-            await page.goto(canonicalVideoUrl,
-            {
-                waitUntil: "domcontentloaded",
-                timeout: 60000,
-            });
-            await WaitForDouyinClientReadyAsync(page, commentApiBootstrap);
+            await WithTimeoutAsync(
+                page.goto(canonicalVideoUrl,
+                {
+                    waitUntil: "domcontentloaded",
+                    timeout: 60000,
+                }),
+                COMMENT_STEP_TIMEOUT_MS,
+                "Mở trang Douyin quá lâu.",
+            );
+            await WithTimeoutAsync(
+                WaitForDouyinClientReadyAsync(page, commentApiBootstrap),
+                COMMENT_STEP_TIMEOUT_MS,
+                "Douyin tải client quá lâu.",
+            );
 
-            const topLevelResult = await FetchTopLevelCommentsAsync(
-                page,
-                videoId,
-                maxComments,
-                startCursor,
-                commentApiBootstrap,
+            const topLevelResult = await WithTimeoutAsync(
+                FetchTopLevelCommentsAsync(
+                    page,
+                    videoId,
+                    maxComments,
+                    startCursor,
+                    commentApiBootstrap,
+                ),
+                GET_COMMENTS_TIMEOUT_MS,
+                "Lấy comment từ Douyin bị quá thời gian chờ.",
             );
             const replyStatus = startCursor === 0
-                ? await ProbeReplyStatusAsync(page, videoId, topLevelResult.comments)
+                ? await WithTimeoutAsync(
+                    ProbeReplyStatusAsync(page, videoId, topLevelResult.comments),
+                    COMMENT_STEP_TIMEOUT_MS,
+                    "Kiểm tra reply của Douyin quá lâu.",
+                ).catch((error) =>
+                {
+                    return {
+                        fetchedReplies: false,
+                        blockedByVerification: false,
+                        blockCode: "reply-probe-timeout",
+                        blockDetails: error instanceof Error ? error.message : "Không rõ lý do.",
+                        attemptedCommentId: "",
+                    };
+                })
                 : null;
             const normalizedComments = topLevelResult.comments.map((comment, index) =>
             {
