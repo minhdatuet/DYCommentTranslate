@@ -1,3 +1,6 @@
+import fs from "node:fs";
+import path from "node:path";
+
 import { chromium } from "playwright";
 
 import { config } from "../config.js";
@@ -12,6 +15,8 @@ const GET_COMMENTS_TIMEOUT_MS = 90000;
 const DOUYIN_CLIENT_READY_TIMEOUT_MS = 15000;
 const MIN_RUNTIME_READY_WAIT_MS = 2000;
 const INTERNAL_COMMENT_REQUEST_TIMEOUT_MS = 12000;
+const COOKIE_SYNC_TIMEOUT_MS = 5 * 60 * 1000;
+const COOKIE_POLL_INTERVAL_MS = 2000;
 const BLOCKED_RESOURCE_TYPES = new Set(["font", "image", "manifest", "media"]);
 const BROWSER_LAUNCH_OPTIONS =
 {
@@ -36,10 +41,21 @@ const CONTEXT_OPTIONS =
     userAgent: "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36",
     locale: "zh-CN",
 };
+const AUTH_STATE_PATH = config.douyinAuthStatePath;
+const AUTH_USER_DATA_DIR = config.douyinAuthUserDataDir;
+const REQUIRED_AUTH_COOKIE_NAMES = new Set([
+    "passport_auth_status",
+    "sessionid",
+    "sessionid_ss",
+    "uid_tt",
+    "sid_guard",
+]);
 
 let sharedBrowserPromise = null;
 let sharedContextPromise = null;
 let latestCommentApiTemplateUrl = "";
+let latestReplyApiTemplateUrl = "";
+let cookieSyncPromise = null;
 
 // Trích video ID từ các dạng link Douyin:
 // - douyin.com/video/<id>
@@ -124,10 +140,77 @@ function NormalizeTopLevelComment(comment, index)
     };
 }
 
+function NormalizeReplyComment(reply, index)
+{
+    return {
+        index: index + 1,
+        commentId: reply.cid ?? "",
+        text: reply.text ?? "",
+        nickname: reply.user?.nickname ?? "Ẩn danh",
+        likeCount: reply.diggCount ?? reply.digg_count ?? 0,
+        replyCount: reply.replyTotal ?? reply.reply_comment_total ?? 0,
+        ipLocation: reply.ipLabel ?? reply.ip_label ?? "",
+        createTime: reply.createTime ?? reply.create_time ?? 0,
+    };
+}
+
 function ResetSharedPlaywrightState()
 {
     sharedBrowserPromise = null;
     sharedContextPromise = null;
+}
+
+function EnsureAuthDirectories()
+{
+    fs.mkdirSync(path.dirname(AUTH_STATE_PATH), { recursive: true });
+    fs.mkdirSync(AUTH_USER_DATA_DIR, { recursive: true });
+}
+
+function HasValidAuthCookies(cookies)
+{
+    const currentUnixTime = Math.floor(Date.now() / 1000);
+
+    return cookies.some((cookie) =>
+    {
+        const hasRequiredName = REQUIRED_AUTH_COOKIE_NAMES.has(cookie.name);
+        const notExpired = cookie.expires === -1 || cookie.expires > currentUnixTime;
+        const hasValue = Boolean(cookie.value);
+
+        return hasRequiredName && notExpired && hasValue;
+    });
+}
+
+function ReadAuthState()
+{
+    if (!fs.existsSync(AUTH_STATE_PATH))
+    {
+        return null;
+    }
+
+    try
+    {
+        return JSON.parse(fs.readFileSync(AUTH_STATE_PATH, "utf8"));
+    }
+    catch
+    {
+        return null;
+    }
+}
+
+function GetCachedAuthStatus()
+{
+    const authState = ReadAuthState();
+    const cookies = Array.isArray(authState?.cookies) ? authState.cookies : [];
+    const isLoggedIn = HasValidAuthCookies(cookies);
+    const lastSyncedAt = fs.existsSync(AUTH_STATE_PATH)
+        ? fs.statSync(AUTH_STATE_PATH).mtime.toISOString()
+        : "";
+
+    return {
+        isLoggedIn,
+        hasCachedState: Boolean(authState),
+        lastSyncedAt,
+    };
 }
 
 async function CloseSharedPlaywrightAsync()
@@ -194,7 +277,14 @@ async function GetSharedContextAsync()
     {
         sharedContextPromise = GetSharedBrowserAsync().then(async (browser) =>
         {
-            const context = await browser.newContext(CONTEXT_OPTIONS);
+            const authStatus = GetCachedAuthStatus();
+            const contextOptions = authStatus.isLoggedIn
+                ? {
+                    ...CONTEXT_OPTIONS,
+                    storageState: AUTH_STATE_PATH,
+                }
+                : CONTEXT_OPTIONS;
+            const context = await browser.newContext(contextOptions);
 
             context.on("close", () =>
             {
@@ -686,6 +776,254 @@ async function FetchTopLevelCommentsAsync(page, videoId, maxComments, startCurso
     }
 }
 
+async function FetchRepliesViaWebpackAsync(page, videoId, commentTargets)
+{
+    return page.evaluate(async ({
+        commentReplyListPath,
+        commentListPath,
+        commentTargets,
+        pageSize,
+        videoId,
+        webpackChunkPrefix,
+        requestTimeoutMs,
+    }) =>
+    {
+        function GetWebpackRequire()
+        {
+            const chunkName = Object.keys(window).find((key) =>
+            {
+                return key.startsWith(webpackChunkPrefix) || key.startsWith("webpackChunk");
+            });
+
+            if (!chunkName)
+            {
+                throw new Error("Không tìm thấy webpack runtime của Douyin.");
+            }
+
+            let webpackRequire;
+            window[chunkName].push([[Symbol("dycomment-replies")], {}, (currentRequire) =>
+            {
+                webpackRequire = currentRequire;
+            }]);
+
+            if (!webpackRequire)
+            {
+                throw new Error("Không truy cập được webpack require.");
+            }
+
+            return webpackRequire;
+        }
+
+        function GetCommentModule(webpackRequire)
+        {
+            for (const [moduleId, factory] of Object.entries(webpackRequire.m))
+            {
+                const source = String(factory);
+
+                if (
+                    source.includes(commentListPath)
+                    && source.includes(commentReplyListPath)
+                )
+                {
+                    const moduleExports = webpackRequire(moduleId);
+
+                    if (
+                        typeof moduleExports?.iq === "function"
+                        && typeof moduleExports?.rs === "function"
+                    )
+                    {
+                        return moduleExports;
+                    }
+                }
+            }
+
+            throw new Error("Không tìm thấy module reply nội bộ của Douyin.");
+        }
+
+        const webpackRequire = GetWebpackRequire();
+        const commentModule = GetCommentModule(webpackRequire);
+        const fetchReplyList = commentModule.rs;
+        const replyMap = {};
+
+        for (const target of commentTargets)
+        {
+            const repliesById = new Map();
+            let cursor = 0;
+            let hasMore = true;
+            let pageCount = 0;
+
+            while (hasMore && repliesById.size < target.replyTotal && pageCount < 40)
+            {
+                const pageResult = await Promise.race([
+                    fetchReplyList({
+                        awemeId: videoId,
+                        commentId: target.commentId,
+                        cursor,
+                        count: pageSize,
+                    }),
+                    new Promise((_, reject) =>
+                    {
+                        setTimeout(() =>
+                        {
+                            reject(new Error(`Reply request timeout for ${target.commentId}`));
+                        }, requestTimeoutMs);
+                    }),
+                ]);
+
+                const replies = Array.isArray(pageResult?.comments) ? pageResult.comments : [];
+
+                for (const reply of replies)
+                {
+                    if (reply?.cid)
+                    {
+                        repliesById.set(reply.cid, reply);
+                    }
+                }
+
+                const nextCursor = Number(pageResult?.cursor ?? cursor);
+                const nextHasMore = Boolean(pageResult?.hasMore ?? pageResult?.has_more);
+
+                if (!nextHasMore || nextCursor === cursor || replies.length === 0)
+                {
+                    hasMore = false;
+                    break;
+                }
+
+                cursor = nextCursor;
+                hasMore = nextHasMore;
+                pageCount += 1;
+            }
+
+            replyMap[target.commentId] = [...repliesById.values()];
+        }
+
+        return replyMap;
+    },
+    {
+        commentReplyListPath: COMMENT_REPLY_LIST_PATH,
+        commentListPath: COMMENT_LIST_PATH,
+        commentTargets,
+        pageSize: COMMENT_PAGE_SIZE,
+        videoId,
+        webpackChunkPrefix: WEBPACK_CHUNK_PREFIX,
+        requestTimeoutMs: INTERNAL_COMMENT_REQUEST_TIMEOUT_MS,
+    });
+}
+
+async function FetchRepliesViaNodeApiAsync(context, videoId, commentId, maxReplies, replyApiTemplateUrl, refererUrl)
+{
+    const repliesById = new Map();
+    const cookieHeader = await BuildCookieHeaderAsync(context, "https://www.douyin.com");
+    let cursor = 0;
+    let hasMore = true;
+    let pageCount = 0;
+
+    while (hasMore && repliesById.size < (maxReplies > 0 ? maxReplies : MAX_TOP_LEVEL_COMMENTS) && pageCount < 40)
+    {
+        const requestUrl = new URL(replyApiTemplateUrl);
+        const controller = new AbortController();
+        const timeoutId = setTimeout(() =>
+        {
+            controller.abort();
+        }, INTERNAL_COMMENT_REQUEST_TIMEOUT_MS);
+
+        requestUrl.searchParams.set("aweme_id", videoId);
+        requestUrl.searchParams.set("comment_id", commentId);
+        requestUrl.searchParams.set("cursor", String(cursor));
+        requestUrl.searchParams.set("count", String(COMMENT_PAGE_SIZE));
+
+        let response;
+
+        try
+        {
+            response = await fetch(requestUrl.toString(),
+            {
+                headers:
+                {
+                    accept: "application/json, text/plain, */*",
+                    cookie: cookieHeader,
+                    referer: refererUrl,
+                    "user-agent": CONTEXT_OPTIONS.userAgent,
+                },
+                signal: controller.signal,
+            });
+        }
+        finally
+        {
+            clearTimeout(timeoutId);
+        }
+
+        if (!response.ok)
+        {
+            throw new Error(`Douyin reply direct API trả về HTTP ${response.status}.`);
+        }
+
+        const pageResult = await response.json();
+        const statusCode = Number(pageResult?.status_code ?? 0);
+
+        if (statusCode !== 0)
+        {
+            throw new Error(`Douyin reply direct API trả về status_code=${statusCode}.`);
+        }
+
+        const replies = Array.isArray(pageResult?.comments) ? pageResult.comments : [];
+
+        for (const reply of replies)
+        {
+            if (reply?.cid)
+            {
+                repliesById.set(reply.cid, reply);
+            }
+        }
+
+        const nextCursor = Number(pageResult?.cursor ?? cursor);
+        const nextHasMore = Boolean(pageResult?.has_more ?? pageResult?.hasMore);
+
+        if (!nextHasMore || nextCursor === cursor || replies.length === 0)
+        {
+            hasMore = nextHasMore && nextCursor !== cursor && replies.length > 0;
+            cursor = nextCursor;
+            break;
+        }
+
+        cursor = nextCursor;
+        hasMore = nextHasMore;
+        pageCount += 1;
+    }
+
+    return {
+        replies: [...repliesById.values()],
+        source: "douyin-direct-reply-api",
+    };
+}
+
+async function WaitForLoginCookiesAsync(context)
+{
+    const startedAt = Date.now();
+
+    while (Date.now() - startedAt < COOKIE_SYNC_TIMEOUT_MS)
+    {
+        if (context.pages().length === 0)
+        {
+            throw new Error("Cửa sổ đồng bộ cookie đã bị đóng trước khi đăng nhập xong.");
+        }
+
+        const cookies = await context.cookies("https://www.douyin.com");
+
+        if (HasValidAuthCookies(cookies))
+        {
+            return cookies;
+        }
+
+        await new Promise((resolve) =>
+        {
+            setTimeout(resolve, COOKIE_POLL_INTERVAL_MS);
+        });
+    }
+
+    throw new Error("Đồng bộ cookie quá thời gian chờ. Hãy thử lại và đăng nhập hoàn tất trong cửa sổ Douyin.");
+}
+
 export class DouyinService
 {
     async WarmupAsync()
@@ -706,15 +1044,282 @@ export class DouyinService
         await CloseSharedPlaywrightAsync();
     }
 
+    GetAuthStatus()
+    {
+        return GetCachedAuthStatus();
+    }
+
+    async SyncCookiesAsync()
+    {
+        if (cookieSyncPromise)
+        {
+            return cookieSyncPromise;
+        }
+
+        cookieSyncPromise = (async () =>
+        {
+            EnsureAuthDirectories();
+            await CloseSharedPlaywrightAsync();
+
+            const persistentContext = await chromium.launchPersistentContext(
+                AUTH_USER_DATA_DIR,
+                {
+                    ...BROWSER_LAUNCH_OPTIONS,
+                    headless: false,
+                    viewport: CONTEXT_OPTIONS.viewport,
+                    userAgent: CONTEXT_OPTIONS.userAgent,
+                    locale: CONTEXT_OPTIONS.locale,
+                },
+            );
+
+            try
+            {
+                const page = persistentContext.pages()[0] ?? await persistentContext.newPage();
+
+                await page.goto("https://www.douyin.com/",
+                {
+                    waitUntil: "domcontentloaded",
+                    timeout: 60000,
+                });
+                await WaitForLoginCookiesAsync(persistentContext);
+                await persistentContext.storageState({ path: AUTH_STATE_PATH });
+            }
+            finally
+            {
+                await persistentContext.close().catch(() =>
+                {
+                    return null;
+                });
+            }
+
+            await CloseSharedPlaywrightAsync();
+
+            const authStatus = GetCachedAuthStatus();
+
+            if (!authStatus.isLoggedIn)
+            {
+                throw new Error("Đã lưu state nhưng không tìm thấy cookie đăng nhập hợp lệ của Douyin.");
+            }
+
+            return authStatus;
+        })();
+
+        try
+        {
+            return await cookieSyncPromise;
+        }
+        finally
+        {
+            cookieSyncPromise = null;
+        }
+    }
+
+    async GetRepliesAsync(videoUrl, commentId, maxReplies = 0)
+    {
+        const authStatus = GetCachedAuthStatus();
+
+        if (!authStatus.isLoggedIn)
+        {
+            return {
+                replies: [],
+                replyStatus:
+                {
+                    fetchedReplies: false,
+                    requiresLogin: true,
+                    blockedByVerification: false,
+                    fetchedReplyCommentCount: 0,
+                },
+            };
+        }
+
+        const context = await GetSharedContextAsync();
+        const resolvedUrl = await ResolveShortUrlAsync(videoUrl);
+        const videoId = ExtractVideoId(resolvedUrl);
+        const canonicalVideoUrl = BuildCanonicalVideoUrl(resolvedUrl);
+
+        // Thử dùng Node API trực tiếp nếu đã có template URL (nhanh hơn, không cần mở page)
+        if (latestReplyApiTemplateUrl)
+        {
+            try
+            {
+                const directResult = await WithTimeoutAsync(
+                    FetchRepliesViaNodeApiAsync(
+                        context,
+                        videoId,
+                        commentId,
+                        maxReplies,
+                        latestReplyApiTemplateUrl,
+                        canonicalVideoUrl,
+                    ),
+                    GET_COMMENTS_TIMEOUT_MS,
+                    "Lấy phản hồi qua direct API bị quá thời gian chờ.",
+                );
+                const rawReplies = directResult.replies;
+                const trimmedReplies = maxReplies > 0 ? rawReplies.slice(0, maxReplies) : rawReplies;
+                const normalizedReplies = trimmedReplies.map((reply, index) =>
+                {
+                    return NormalizeReplyComment(reply, index);
+                });
+
+                return {
+                    replies: normalizedReplies,
+                    replyStatus:
+                    {
+                        fetchedReplies: normalizedReplies.length > 0,
+                        requiresLogin: false,
+                        blockedByVerification: false,
+                        fetchedReplyCommentCount: normalizedReplies.length,
+                    },
+                };
+            }
+            catch
+            {
+                latestReplyApiTemplateUrl = "";
+            }
+        }
+
+        // Fallback: mở Playwright page và dùng webpack
+        const page = await context.newPage();
+        const replyApiBootstrap = { value: "" };
+        const replyBootstrapResponseHandler = (response) =>
+        {
+            const url = response.url();
+
+            if (!replyApiBootstrap.value && url.includes(COMMENT_REPLY_LIST_PATH))
+            {
+                replyApiBootstrap.value = url;
+                latestReplyApiTemplateUrl = url;
+            }
+        };
+
+        page.on("response", replyBootstrapResponseHandler);
+
+        try
+        {
+            await WithTimeoutAsync(
+                page.goto(canonicalVideoUrl,
+                {
+                    waitUntil: "domcontentloaded",
+                    timeout: 60000,
+                }),
+                COMMENT_STEP_TIMEOUT_MS,
+                "Mở trang Douyin quá lâu khi lấy phản hồi.",
+            );
+            await WithTimeoutAsync(
+                WaitForDouyinClientReadyAsync(page, { value: "" }),
+                COMMENT_STEP_TIMEOUT_MS,
+                "Douyin tải client quá lâu khi lấy phản hồi.",
+            );
+
+            let rawReplies = [];
+            let webpackError;
+
+            try
+            {
+                const replyMap = await WithTimeoutAsync(
+                    FetchRepliesViaWebpackAsync(page, videoId,
+                    [
+                        {
+                            commentId,
+                            replyTotal: maxReplies > 0 ? maxReplies : MAX_TOP_LEVEL_COMMENTS,
+                        },
+                    ]),
+                    GET_COMMENTS_TIMEOUT_MS,
+                    "Lấy phản hồi từ Douyin bị quá thời gian chờ.",
+                );
+                rawReplies = Array.isArray(replyMap?.[commentId]) ? replyMap[commentId] : [];
+            }
+            catch (firstError)
+            {
+                webpackError = firstError;
+
+                // Fallback trong page: dùng captured API URL nếu có
+                if (replyApiBootstrap.value || latestReplyApiTemplateUrl)
+                {
+                    const fallbackUrl = replyApiBootstrap.value || latestReplyApiTemplateUrl;
+
+                    try
+                    {
+                        const directResult = await WithTimeoutAsync(
+                            FetchRepliesViaNodeApiAsync(
+                                context,
+                                videoId,
+                                commentId,
+                                maxReplies,
+                                fallbackUrl,
+                                canonicalVideoUrl,
+                            ),
+                            GET_COMMENTS_TIMEOUT_MS,
+                            "Lấy phản hồi fallback API bị quá thời gian chờ.",
+                        );
+                        rawReplies = directResult.replies;
+                        webpackError = null;
+                    }
+                    catch (apiError)
+                    {
+                        const webpackMsg = webpackError instanceof Error ? webpackError.message : "Không rõ lý do.";
+                        const apiMsg = apiError instanceof Error ? apiError.message : "Không rõ lý do.";
+
+                        throw new Error(`Lấy phản hồi thất bại qua webpack (${webpackMsg}) và fallback API (${apiMsg}).`);
+                    }
+                }
+                else
+                {
+                    throw webpackError;
+                }
+            }
+
+            const trimmedReplies = maxReplies > 0 ? rawReplies.slice(0, maxReplies) : rawReplies;
+            const normalizedReplies = trimmedReplies.map((reply, index) =>
+            {
+                return NormalizeReplyComment(reply, index);
+            });
+
+            return {
+                replies: normalizedReplies,
+                replyStatus:
+                {
+                    fetchedReplies: normalizedReplies.length > 0,
+                    requiresLogin: false,
+                    blockedByVerification: false,
+                    fetchedReplyCommentCount: normalizedReplies.length,
+                },
+            };
+        }
+        catch (error)
+        {
+            return {
+                replies: [],
+                replyStatus:
+                {
+                    fetchedReplies: false,
+                    requiresLogin: false,
+                    blockedByVerification: true,
+                    fetchedReplyCommentCount: 0,
+                    error: error instanceof Error ? error.message : "Lấy phản hồi thất bại.",
+                },
+            };
+        }
+        finally
+        {
+            page.off("response", replyBootstrapResponseHandler);
+            await page.close().catch(() =>
+            {
+                return null;
+            });
+        }
+    }
+
     async GetCommentsAsync(videoUrl, maxComments = 0, startCursor = 0)
     {
         const context = await GetSharedContextAsync();
+        const authStatus = GetCachedAuthStatus();
         const resolvedUrl = await ResolveShortUrlAsync(videoUrl);
         const videoId = ExtractVideoId(resolvedUrl);
         const canonicalVideoUrl = BuildCanonicalVideoUrl(resolvedUrl);
         const normalizedMaxComments = maxComments > 0 ? maxComments : MAX_TOP_LEVEL_COMMENTS;
 
-        if (latestCommentApiTemplateUrl)
+        if (latestCommentApiTemplateUrl && !authStatus.isLoggedIn)
         {
             try
             {
@@ -761,11 +1366,17 @@ export class DouyinService
         {
             const url = response.url();
 
-            if (
-                commentApiBootstrap.value
-                || !url.includes(COMMENT_LIST_PATH)
-                || url.includes(COMMENT_REPLY_LIST_PATH)
-            )
+            if (url.includes(COMMENT_REPLY_LIST_PATH))
+            {
+                if (!latestReplyApiTemplateUrl)
+                {
+                    latestReplyApiTemplateUrl = url;
+                }
+
+                return;
+            }
+
+            if (commentApiBootstrap.value || !url.includes(COMMENT_LIST_PATH))
             {
                 return;
             }
@@ -808,6 +1419,70 @@ export class DouyinService
             {
                 return NormalizeTopLevelComment(comment, index);
             });
+            let replyStatus =
+            {
+                fetchedReplies: false,
+                requiresLogin: !authStatus.isLoggedIn,
+                blockedByVerification: false,
+                fetchedReplyCommentCount: 0,
+            };
+
+            if (authStatus.isLoggedIn)
+            {
+                const replyTargets = topLevelResult.comments
+                    .filter((comment) => Number(comment.replyTotal ?? comment.reply_comment_total ?? 0) > 0)
+                    .map((comment) =>
+                    {
+                        return {
+                            commentId: comment.cid,
+                            replyTotal: Number(comment.replyTotal ?? comment.reply_comment_total ?? 0),
+                        };
+                    });
+
+                if (replyTargets.length > 0)
+                {
+                    try
+                    {
+                        const replyMap = await WithTimeoutAsync(
+                            FetchRepliesViaWebpackAsync(page, videoId, replyTargets),
+                            GET_COMMENTS_TIMEOUT_MS,
+                            "Lấy reply từ Douyin bị quá thời gian chờ.",
+                        );
+                        let fetchedReplyCommentCount = 0;
+
+                        for (const normalizedComment of normalizedComments)
+                        {
+                            const replies = Array.isArray(replyMap?.[normalizedComment.commentId])
+                                ? replyMap[normalizedComment.commentId]
+                                : [];
+                            normalizedComment.replies = replies.map((reply, index) =>
+                            {
+                                return NormalizeReplyComment(reply, index);
+                            });
+                            fetchedReplyCommentCount += normalizedComment.replies.length;
+                        }
+
+                        replyStatus =
+                        {
+                            fetchedReplies: fetchedReplyCommentCount > 0,
+                            requiresLogin: false,
+                            blockedByVerification: false,
+                            fetchedReplyCommentCount,
+                        };
+                    }
+                    catch (error)
+                    {
+                        replyStatus =
+                        {
+                            fetchedReplies: false,
+                            requiresLogin: false,
+                            blockedByVerification: true,
+                            fetchedReplyCommentCount: 0,
+                            error: error instanceof Error ? error.message : "Lấy reply thất bại.",
+                        };
+                    }
+                }
+            }
 
             return {
                 videoId,
@@ -817,7 +1492,7 @@ export class DouyinService
                 reportedCommentCount: topLevelResult.reportedTotal,
                 nextCursor: topLevelResult.nextCursor,
                 douyinHasMore: topLevelResult.douyinHasMore,
-                replyStatus: null,
+                replyStatus,
             };
         }
         finally

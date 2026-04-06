@@ -88,6 +88,40 @@ body
     margin-bottom: 20px;
 }
 
+.auth-row
+{
+    display: flex;
+    justify-content: space-between;
+    gap: 16px;
+    align-items: center;
+    padding: 18px 20px;
+    border: 1px solid var(--line);
+    border-radius: 22px;
+    background: rgba(255, 255, 255, 0.56);
+}
+
+.auth-summary
+{
+    display: grid;
+    gap: 6px;
+}
+
+.auth-label
+{
+    margin: 0;
+    font-size: 0.84rem;
+    font-weight: 700;
+    letter-spacing: 0.14em;
+    text-transform: uppercase;
+    color: var(--muted);
+}
+
+.auth-value
+{
+    margin: 0;
+    line-height: 1.6;
+}
+
 .tool-form
 {
     display: grid;
@@ -127,6 +161,20 @@ button
     color: #fff9f1;
     background: linear-gradient(135deg, var(--accent) 0%, var(--accent-strong) 100%);
     cursor: pointer;
+}
+
+.secondary-button
+{
+    width: auto;
+    min-width: 220px;
+    color: var(--accent-strong);
+    background: rgba(210, 105, 60, 0.12);
+    border: 1px solid rgba(210, 105, 60, 0.2);
+}
+
+.secondary-button[hidden]
+{
+    display: none;
 }
 
 button:disabled
@@ -281,6 +329,80 @@ button:disabled
     color: var(--accent-strong);
 }
 
+.reply-actions
+{
+    margin-top: 16px;
+}
+
+.reply-toggle-button
+{
+    width: auto;
+    padding: 10px 14px;
+    border-radius: 999px;
+    background: rgba(111, 91, 69, 0.08);
+    color: var(--accent-strong);
+    border: 1px solid rgba(83, 57, 27, 0.16);
+}
+
+.reply-slot
+{
+    margin-top: 14px;
+}
+
+.reply-list
+{
+    margin-top: 18px;
+    padding-top: 18px;
+    border-top: 1px solid var(--line);
+    display: grid;
+    gap: 10px;
+}
+
+.reply-title
+{
+    margin: 0;
+    font-size: 0.85rem;
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: 0.12em;
+    color: var(--muted);
+}
+
+.reply-card
+{
+    padding: 12px 14px;
+    border-radius: 16px;
+    background: rgba(111, 91, 69, 0.06);
+}
+
+.reply-meta
+{
+    margin: 0 0 6px;
+    font-size: 0.92rem;
+    font-weight: 700;
+}
+
+.reply-text
+{
+    margin: 0;
+    line-height: 1.65;
+}
+
+.reply-translation
+{
+    margin: 8px 0 0;
+    line-height: 1.65;
+    color: var(--accent-strong);
+}
+
+.reply-empty
+{
+    padding: 14px;
+    border-radius: 16px;
+    background: rgba(111, 91, 69, 0.06);
+    color: var(--muted);
+}
+
 .load-more-button
 {
     width: 100%;
@@ -313,6 +435,12 @@ button:disabled
     .tool-form
     {
         grid-template-columns: 1fr;
+    }
+
+    .auth-row
+    {
+        align-items: stretch;
+        flex-direction: column;
     }
 
     .comment-columns,

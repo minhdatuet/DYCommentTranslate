@@ -33,13 +33,48 @@ app.use(express.static(config.publicDir));
 
 app.get("/api/health", (request, response) =>
 {
+    const douyinAuthStatus = douyinService.GetAuthStatus();
+
     response.json(
     {
         ok: true,
         geminiConfigured: geminiTranslator.IsConfigured,
         stvConfigured: stvTranslator.IsConfigured,
         offlineDictDir: config.offlineDictDir,
+        douyinAuthStatus,
     });
+});
+
+app.get("/api/douyin/auth-status", (request, response) =>
+{
+    response.json(
+    {
+        ok: true,
+        ...douyinService.GetAuthStatus(),
+    });
+});
+
+app.post("/api/douyin/sync-cookies", async (request, response) =>
+{
+    try
+    {
+        const authStatus = await douyinService.SyncCookiesAsync();
+        commentCache.clear();
+
+        response.json(
+        {
+            ok: true,
+            ...authStatus,
+        });
+    }
+    catch (error)
+    {
+        response.status(500).json(
+        {
+            ok: false,
+            error: error instanceof Error ? error.message : "Đồng bộ cookie thất bại.",
+        });
+    }
 });
 
 app.post("/api/comments", async (request, response) =>
@@ -168,6 +203,49 @@ app.post("/api/comments", async (request, response) =>
         {
             ok: false,
             error: error instanceof Error ? error.message : "Lỗi không xác định.",
+        });
+    }
+});
+
+app.post("/api/comment-replies", async (request, response) =>
+{
+    const videoUrl = String(request.body?.videoUrl ?? "").trim();
+    const commentId = String(request.body?.commentId ?? "").trim();
+    const translationMode = String(request.body?.translationMode ?? "offline").trim().toLowerCase();
+    const limit = Number(request.body?.limit) || 0;
+
+    if (!videoUrl || !commentId)
+    {
+        response.status(400).json(
+        {
+            ok: false,
+            error: "Thiếu videoUrl hoặc commentId.",
+        });
+        return;
+    }
+
+    try
+    {
+        const result = await douyinService.GetRepliesAsync(videoUrl, commentId, limit);
+        const translatedReplies = await translationService.TranslateCommentsAsync(
+            result.replies,
+            translationMode,
+        );
+
+        response.json(
+        {
+            ok: true,
+            commentId,
+            replyStatus: result.replyStatus,
+            replies: translatedReplies,
+        });
+    }
+    catch (error)
+    {
+        response.status(500).json(
+        {
+            ok: false,
+            error: error instanceof Error ? error.message : "Lấy phản hồi thất bại.",
         });
     }
 });

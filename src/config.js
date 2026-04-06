@@ -20,5 +20,7 @@ export const config =
     playwrightHeadless: (process.env.PLAYWRIGHT_HEADLESS ?? "true").toLowerCase() !== "false",
     playwrightLaunchTimeoutMs: Number(process.env.PLAYWRIGHT_LAUNCH_TIMEOUT_MS ?? 30000),
     douyinWarmupVideoUrl: String(process.env.DOUYIN_WARMUP_VIDEO_URL ?? "").trim(),
+    douyinAuthStatePath: path.resolve(".cache", "douyin-storage-state.json"),
+    douyinAuthUserDataDir: path.resolve(".cache", "douyin-auth-profile"),
     publicDir: path.resolve("public"),
 };
