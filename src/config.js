@@ -5,7 +5,9 @@ import dotenv from "dotenv";
 
 dotenv.config();
 
-const DEFAULT_DICT_DIR = "D:\\Novel\\convert-etx";
+const DEFAULT_DICT_DIR = process.platform === "win32"
+    ? "D:\\Novel\\convert-etx"
+    : "./dict";
 const DEFAULT_STV_API_URL = "https://comic.sangtacvietcdn.xyz/tsm.php?cdn=";
 
 export const config =

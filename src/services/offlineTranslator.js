@@ -16,11 +16,16 @@ export class OfflineTranslator
         this.#dictDirectory = dictRootDirectory;
     }
 
+    get IsAvailable()
+    {
+        return this.#loaded;
+    }
+
     EnsureLoaded()
     {
         if (this.#loaded)
         {
-            return;
+            return true;
         }
 
         const requiredFiles =
@@ -39,22 +44,37 @@ export class OfflineTranslator
 
         if (missingFiles.length > 0)
         {
-            throw new Error(`Thiếu dữ liệu từ điển offline: ${missingFiles.join(", ")}`);
+            console.warn(`Từ điển offline không khả dụng (thiếu: ${missingFiles.join(", ")})`);
+            return false;
         }
 
         this.#engine.Load(this.#dictDirectory);
         this.#loaded = true;
+        return true;
     }
 
     Translate(text)
     {
-        this.EnsureLoaded();
+        if (!this.EnsureLoaded())
+        {
+            return text;
+        }
+
         return this.#engine.Translate(text);
     }
 
     TranslateComments(comments)
     {
-        this.EnsureLoaded();
+        if (!this.EnsureLoaded())
+        {
+            return comments.map((comment) =>
+            {
+                return {
+                    ...comment,
+                    translatedText: comment.text,
+                };
+            });
+        }
 
         return comments.map((comment) =>
         {
