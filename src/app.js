@@ -7,12 +7,17 @@ import { OfflineTranslator } from "./services/offlineTranslator.js";
 import { StvTranslator } from "./services/stvTranslator.js";
 import { TranslationService } from "./services/translationService.js";
 
+const CACHE_TTL_MS = 10 * 60 * 1000; // 10 phút
+
 const app = express();
 const douyinService = new DouyinService();
 const offlineTranslator = new OfflineTranslator(config.offlineDictDir);
 const geminiTranslator = new GeminiTranslator();
 const stvTranslator = new StvTranslator();
 const translationService = new TranslationService(offlineTranslator, geminiTranslator, stvTranslator);
+
+// Cache comment đã crawl theo videoId, tránh mở browser lại khi "Tải thêm"
+const commentCache = new Map();
 
 app.use(express.json(
 {
@@ -35,6 +40,8 @@ app.post("/api/comments", async (request, response) =>
 {
     const videoUrl = String(request.body?.videoUrl ?? "").trim();
     const translationMode = String(request.body?.translationMode ?? "offline").trim().toLowerCase();
+    const limit = Number(request.body?.limit) || 0; // 0 = tải hết
+    const offset = Number(request.body?.offset) || 0;
 
     if (!videoUrl)
     {
@@ -48,21 +55,96 @@ app.post("/api/comments", async (request, response) =>
 
     try
     {
-        const result = await douyinService.GetCommentsAsync(videoUrl);
+        let result;
+        let cached = null;
+
+        // Tìm cache theo videoUrl
+        for (const [, entry] of commentCache)
+        {
+            if (entry.videoUrl === videoUrl)
+            {
+                cached = entry;
+                break;
+            }
+        }
+
+        if (offset > 0 && cached && offset < cached.comments.length)
+        {
+            // Có sẵn trong cache → chỉ cần slice + dịch
+            const slicedComments = limit > 0
+                ? cached.comments.slice(offset, offset + limit)
+                : cached.comments.slice(offset);
+
+            const translatedComments = await translationService.TranslateCommentsAsync(
+                slicedComments,
+                translationMode,
+            );
+
+            const hasMore = cached.douyinHasMore || (limit > 0 && (offset + limit) < cached.comments.length);
+
+            response.json(
+            {
+                ok: true,
+                videoId: cached.videoId,
+                source: "douyin-webpack-client",
+                totalFetched: cached.comments.length,
+                reportedCommentCount: cached.reportedCommentCount,
+                replyStatus: cached.replyStatus,
+                offset,
+                hasMore,
+                comments: translatedComments,
+            });
+            return;
+        }
+
+        // Cần crawl từ Douyin (lần đầu hoặc tải thêm)
+        const startCursor = cached?.nextCursor ?? 0;
+        result = await douyinService.GetCommentsAsync(videoUrl, limit, startCursor);
+
+        // Gộp vào cache
+        const previousComments = cached?.comments ?? [];
+        const allComments = [...previousComments, ...result.comments];
+
+        const cacheEntry =
+        {
+            videoUrl,
+            videoId: result.videoId,
+            comments: allComments,
+            reportedCommentCount: result.reportedCommentCount,
+            replyStatus: cached?.replyStatus ?? result.replyStatus,
+            nextCursor: result.nextCursor,
+            douyinHasMore: result.douyinHasMore,
+            createdAt: cached?.createdAt ?? Date.now(),
+        };
+
+        commentCache.set(result.videoId, cacheEntry);
+
+        // Dọn cache cũ
+        for (const [key, entry] of commentCache)
+        {
+            if (Date.now() - entry.createdAt > CACHE_TTL_MS)
+            {
+                commentCache.delete(key);
+            }
+        }
+
         const translatedComments = await translationService.TranslateCommentsAsync(
             result.comments,
             translationMode,
         );
+
+        const hasMore = result.douyinHasMore;
 
         response.json(
         {
             ok: true,
             videoId: result.videoId,
             source: result.source,
-            totalComments: translatedComments.length,
-            topLevelCommentCount: result.topLevelCommentCount ?? translatedComments.length,
-            reportedCommentCount: result.reportedCommentCount ?? translatedComments.length,
-            replyStatus: result.replyStatus ?? null,
+            totalFetched: allComments.length,
+            reportedCommentCount: result.reportedCommentCount,
+            replyStatus: cacheEntry.replyStatus,
+            offset: previousComments.length,
+            hasMore,
             comments: translatedComments,
         });
     }

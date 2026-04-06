@@ -5,6 +5,14 @@ const resultTitle = document.getElementById("resultTitle");
 const resultMeta = document.getElementById("resultMeta");
 const commentList = document.getElementById("commentList");
 
+// State cho pagination
+let currentVideoUrl = "";
+let currentTranslationMode = "";
+let currentLimit = 0;
+let currentOffset = 0;
+let hasMore = false;
+let isLoadingMore = false;
+
 function SetStatus(message, variant)
 {
     statusBox.textContent = message;
@@ -20,39 +28,9 @@ function EscapeHtml(text)
         .replaceAll("\"", "&quot;");
 }
 
-function RenderComments(payload)
+function RenderCommentCards(comments)
 {
-    resultTitle.textContent = `Video ${payload.videoId || "không xác định"}`;
-    const metaItems =
-    [
-        `${payload.topLevelCommentCount || payload.totalComments} comment cấp 1`,
-        `Douyin báo ${payload.reportedCommentCount || payload.totalComments} comment`,
-        `Nguồn: ${payload.source}`,
-    ];
-
-    if (payload.replyStatus?.blockedByVerification)
-    {
-        metaItems.push("Reply bị Douyin chặn bằng verify");
-    }
-    else if (payload.replyStatus?.fetchedReplies)
-    {
-        metaItems.push("Đã lấy được reply");
-    }
-
-    resultMeta.innerHTML = metaItems.map((item) =>
-    {
-        return `<span>${EscapeHtml(item)}</span>`;
-    }).join("");
-
-    if (!payload.comments.length)
-    {
-        commentList.className = "comment-list empty";
-        commentList.textContent = "Không có comment để hiển thị.";
-        return;
-    }
-
-    commentList.className = "comment-list";
-    commentList.innerHTML = payload.comments.map((comment) =>
+    return comments.map((comment) =>
     {
         return `
             <article class="comment-card">
@@ -80,40 +58,184 @@ function RenderComments(payload)
     }).join("");
 }
 
+function RemoveLoadMoreButton()
+{
+    const existingButton = commentList.querySelector(".load-more-button");
+
+    if (existingButton)
+    {
+        existingButton.remove();
+    }
+}
+
+function AppendLoadMoreButton()
+{
+    RemoveLoadMoreButton();
+
+    const button = document.createElement("button");
+    button.className = "load-more-button";
+    button.textContent = `Tải thêm ${currentLimit} comment`;
+    button.addEventListener("click", LoadMoreComments);
+    commentList.appendChild(button);
+}
+
+function RenderComments(payload)
+{
+    resultTitle.textContent = `Video ${payload.videoId || "không xác định"}`;
+    const metaItems =
+    [
+        `${payload.topLevelCommentCount || payload.totalFetched} comment cấp 1`,
+        `Douyin báo ${payload.reportedCommentCount || payload.totalFetched} comment`,
+        `Nguồn: ${payload.source}`,
+    ];
+
+    if (payload.replyStatus?.blockedByVerification)
+    {
+        metaItems.push("Reply bị Douyin chặn bằng verify");
+    }
+    else if (payload.replyStatus?.fetchedReplies)
+    {
+        metaItems.push("Đã lấy được reply");
+    }
+
+    resultMeta.innerHTML = metaItems.map((item) =>
+    {
+        return `<span>${EscapeHtml(item)}</span>`;
+    }).join("");
+
+    if (!payload.comments.length)
+    {
+        commentList.className = "comment-list empty";
+        commentList.textContent = "Không có comment để hiển thị.";
+        return;
+    }
+
+    commentList.className = "comment-list";
+    commentList.innerHTML = RenderCommentCards(payload.comments);
+
+    hasMore = payload.hasMore;
+
+    if (hasMore)
+    {
+        AppendLoadMoreButton();
+    }
+}
+
+function AppendComments(payload)
+{
+    RemoveLoadMoreButton();
+
+    commentList.insertAdjacentHTML("beforeend", RenderCommentCards(payload.comments));
+
+    hasMore = payload.hasMore;
+
+    if (hasMore)
+    {
+        AppendLoadMoreButton();
+    }
+}
+
+async function FetchComments(videoUrl, translationMode, limit, offset)
+{
+    const response = await fetch("/api/comments",
+    {
+        method: "POST",
+        headers:
+        {
+            "Content-Type": "application/json",
+        },
+        body: JSON.stringify({ videoUrl, translationMode, limit, offset }),
+    });
+    const responseJson = await response.json();
+
+    if (!response.ok || !responseJson.ok)
+    {
+        throw new Error(responseJson.error || "Không thể lấy comment.");
+    }
+
+    return responseJson;
+}
+
+async function LoadMoreComments()
+{
+    if (isLoadingMore)
+    {
+        return;
+    }
+
+    isLoadingMore = true;
+    const loadMoreButton = commentList.querySelector(".load-more-button");
+
+    if (loadMoreButton)
+    {
+        loadMoreButton.disabled = true;
+        loadMoreButton.textContent = "Đang tải thêm...";
+    }
+
+    try
+    {
+        currentOffset += currentLimit;
+        const responseJson = await FetchComments(
+            currentVideoUrl,
+            currentTranslationMode,
+            currentLimit,
+            currentOffset,
+        );
+
+        AppendComments(responseJson);
+        SetStatus(
+            `Đã hiển thị ${currentOffset + responseJson.comments.length}/${responseJson.totalFetched} comment.`,
+            "success",
+        );
+    }
+    catch (error)
+    {
+        if (loadMoreButton)
+        {
+            loadMoreButton.disabled = false;
+            loadMoreButton.textContent = `Tải thêm ${currentLimit} comment`;
+        }
+
+        currentOffset -= currentLimit;
+        SetStatus(error instanceof Error ? error.message : "Lỗi tải thêm.", "error");
+    }
+    finally
+    {
+        isLoadingMore = false;
+    }
+}
+
 commentForm.addEventListener("submit", async (event) =>
 {
     event.preventDefault();
 
     const formData = new FormData(commentForm);
-    const payload =
-    {
-        videoUrl: String(formData.get("videoUrl") ?? "").trim(),
-        translationMode: String(formData.get("translationMode") ?? "offline").trim(),
-    };
+    currentVideoUrl = String(formData.get("videoUrl") ?? "").trim();
+    currentTranslationMode = String(formData.get("translationMode") ?? "offline").trim();
+    currentLimit = Number(formData.get("commentLimit")) || 0;
+    currentOffset = 0;
 
     submitButton.disabled = true;
     SetStatus("Đang tải comment từ Douyin...", "loading");
 
     try
     {
-        const response = await fetch("/api/comments",
-        {
-            method: "POST",
-            headers:
-            {
-                "Content-Type": "application/json",
-            },
-            body: JSON.stringify(payload),
-        });
-        const responseJson = await response.json();
-
-        if (!response.ok || !responseJson.ok)
-        {
-            throw new Error(responseJson.error || "Không thể lấy comment.");
-        }
+        const responseJson = await FetchComments(
+            currentVideoUrl,
+            currentTranslationMode,
+            currentLimit,
+            currentOffset,
+        );
 
         RenderComments(responseJson);
-        SetStatus("Tải comment thành công.", "success");
+
+        const shown = responseJson.comments.length;
+        const total = responseJson.totalFetched;
+        const statusText = responseJson.hasMore
+            ? `Hiển thị ${shown}/${total} comment. Bấm "Tải thêm" để xem tiếp.`
+            : `Tải ${shown} comment thành công.`;
+
+        SetStatus(statusText, "success");
     }
     catch (error)
     {

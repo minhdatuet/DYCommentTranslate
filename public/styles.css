@@ -91,7 +91,7 @@ body
 .tool-form
 {
     display: grid;
-    grid-template-columns: minmax(0, 1fr) 220px 160px;
+    grid-template-columns: minmax(0, 1fr) 180px 120px 160px;
     gap: 16px;
     align-items: end;
 }
@@ -279,6 +279,33 @@ button:disabled
 .comment-text.translated
 {
     color: var(--accent-strong);
+}
+
+.load-more-button
+{
+    width: 100%;
+    padding: 16px;
+    border: 2px dashed var(--line);
+    border-radius: 20px;
+    background: rgba(210, 105, 60, 0.06);
+    color: var(--accent-strong);
+    font: inherit;
+    font-weight: 700;
+    font-size: 1rem;
+    cursor: pointer;
+    transition: background 0.15s, border-color 0.15s;
+}
+
+.load-more-button:hover
+{
+    background: rgba(210, 105, 60, 0.14);
+    border-color: var(--accent);
+}
+
+.load-more-button:disabled
+{
+    opacity: 0.6;
+    cursor: progress;
 }
 
 @media (max-width: 900px)

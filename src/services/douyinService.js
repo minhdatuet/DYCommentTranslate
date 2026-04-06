@@ -90,9 +90,9 @@ function NormalizeTopLevelComment(comment, index)
     };
 }
 
-async function FetchTopLevelCommentsAsync(page, videoId)
+async function FetchTopLevelCommentsAsync(page, videoId, maxComments, startCursor = 0)
 {
-    return page.evaluate(async ({ pageSize, videoId, maxTopLevelComments, webpackChunkPrefix }) =>
+    return page.evaluate(async ({ pageSize, videoId, maxTopLevelComments, webpackChunkPrefix, startCursor }) =>
     {
         function GetWebpackRequire()
         {
@@ -153,7 +153,7 @@ async function FetchTopLevelCommentsAsync(page, videoId)
         }
 
         const commentsById = new Map();
-        let cursor = 0;
+        let cursor = startCursor;
         let hasMore = true;
         let pageCount = 0;
         let reportedTotal = 0;
@@ -192,13 +192,16 @@ async function FetchTopLevelCommentsAsync(page, videoId)
         return {
             comments: [...commentsById.values()],
             reportedTotal,
+            nextCursor: cursor,
+            douyinHasMore: hasMore,
         };
     },
     {
         pageSize: COMMENT_PAGE_SIZE,
         videoId,
-        maxTopLevelComments: MAX_TOP_LEVEL_COMMENTS,
+        maxTopLevelComments: maxComments > 0 ? maxComments : MAX_TOP_LEVEL_COMMENTS,
         webpackChunkPrefix: WEBPACK_CHUNK_PREFIX,
+        startCursor,
     });
 }
 
@@ -356,7 +359,7 @@ async function ProbeReplyStatusAsync(page, videoId, comments)
 
 export class DouyinService
 {
-    async GetCommentsAsync(videoUrl)
+    async GetCommentsAsync(videoUrl, maxComments = 0, startCursor = 0)
     {
         const browser = await chromium.launch(
         {
@@ -388,8 +391,10 @@ export class DouyinService
             });
             await page.waitForTimeout(5000);
 
-            const topLevelResult = await FetchTopLevelCommentsAsync(page, videoId);
-            const replyStatus = await ProbeReplyStatusAsync(page, videoId, topLevelResult.comments);
+            const topLevelResult = await FetchTopLevelCommentsAsync(page, videoId, maxComments, startCursor);
+            const replyStatus = startCursor === 0
+                ? await ProbeReplyStatusAsync(page, videoId, topLevelResult.comments)
+                : null;
             const normalizedComments = topLevelResult.comments.map((comment, index) =>
             {
                 return NormalizeTopLevelComment(comment, index);
@@ -401,6 +406,8 @@ export class DouyinService
                 source: "douyin-webpack-client",
                 topLevelCommentCount: normalizedComments.length,
                 reportedCommentCount: topLevelResult.reportedTotal,
+                nextCursor: topLevelResult.nextCursor,
+                douyinHasMore: topLevelResult.douyinHasMore,
                 replyStatus,
             };
         }
