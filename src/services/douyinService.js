@@ -9,8 +9,37 @@ const MAX_TOP_LEVEL_COMMENTS = 400;
 const COMMENT_PAGE_SIZE = 20;
 const COMMENT_STEP_TIMEOUT_MS = 30000;
 const GET_COMMENTS_TIMEOUT_MS = 90000;
-const REPLY_PROBE_TIMEOUT_MS = 6000;
 const DOUYIN_CLIENT_READY_TIMEOUT_MS = 15000;
+const MIN_RUNTIME_READY_WAIT_MS = 2000;
+const INTERNAL_COMMENT_REQUEST_TIMEOUT_MS = 12000;
+const BLOCKED_RESOURCE_TYPES = new Set(["font", "image", "manifest", "media"]);
+const BROWSER_LAUNCH_OPTIONS =
+{
+    headless: config.playwrightHeadless,
+    timeout: config.playwrightLaunchTimeoutMs,
+    chromiumSandbox: false,
+    args:
+    [
+        "--disable-dev-shm-usage",
+        "--disable-gpu",
+        "--disable-setuid-sandbox",
+        "--no-sandbox",
+    ],
+};
+const CONTEXT_OPTIONS =
+{
+    viewport:
+    {
+        width: 1440,
+        height: 1200,
+    },
+    userAgent: "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36",
+    locale: "zh-CN",
+};
+
+let sharedBrowserPromise = null;
+let sharedContextPromise = null;
+let latestCommentApiTemplateUrl = "";
 
 // Trích video ID từ các dạng link Douyin:
 // - douyin.com/video/<id>
@@ -95,6 +124,34 @@ function NormalizeTopLevelComment(comment, index)
     };
 }
 
+function ResetSharedPlaywrightState()
+{
+    sharedBrowserPromise = null;
+    sharedContextPromise = null;
+}
+
+async function CloseSharedPlaywrightAsync()
+{
+    const browserPromise = sharedBrowserPromise;
+
+    ResetSharedPlaywrightState();
+
+    if (!browserPromise)
+    {
+        return;
+    }
+
+    try
+    {
+        const browser = await browserPromise;
+        await browser.close();
+    }
+    catch
+    {
+        return;
+    }
+}
+
 function WithTimeoutAsync(promise, timeoutMs, errorMessage)
 {
     return Promise.race([
@@ -107,6 +164,75 @@ function WithTimeoutAsync(promise, timeoutMs, errorMessage)
             }, timeoutMs);
         }),
     ]);
+}
+
+async function GetSharedBrowserAsync()
+{
+    if (!sharedBrowserPromise)
+    {
+        sharedBrowserPromise = chromium.launch(BROWSER_LAUNCH_OPTIONS).then((browser) =>
+        {
+            browser.on("disconnected", () =>
+            {
+                ResetSharedPlaywrightState();
+            });
+
+            return browser;
+        }).catch((error) =>
+        {
+            ResetSharedPlaywrightState();
+            throw error;
+        });
+    }
+
+    return sharedBrowserPromise;
+}
+
+async function GetSharedContextAsync()
+{
+    if (!sharedContextPromise)
+    {
+        sharedContextPromise = GetSharedBrowserAsync().then(async (browser) =>
+        {
+            const context = await browser.newContext(CONTEXT_OPTIONS);
+
+            context.on("close", () =>
+            {
+                sharedContextPromise = null;
+            });
+
+            await context.route("**/*", async (route) =>
+            {
+                const request = route.request();
+
+                if (BLOCKED_RESOURCE_TYPES.has(request.resourceType()))
+                {
+                    await route.abort();
+                    return;
+                }
+
+                await route.continue();
+            });
+
+            return context;
+        }).catch((error) =>
+        {
+            sharedContextPromise = null;
+            throw error;
+        });
+    }
+
+    return sharedContextPromise;
+}
+
+async function BuildCookieHeaderAsync(context, requestUrl)
+{
+    const cookies = await context.cookies(requestUrl);
+
+    return cookies.map((cookie) =>
+    {
+        return `${cookie.name}=${cookie.value}`;
+    }).join("; ");
 }
 
 async function WaitForDouyinClientReadyAsync(page, commentApiBootstrap)
@@ -127,26 +253,26 @@ async function WaitForDouyinClientReadyAsync(page, commentApiBootstrap)
                 {
                     return key.startsWith(webpackChunkPrefix) || key.startsWith("webpackChunk");
                 }),
-                bodyTextPreview: document.body?.innerText?.replace(/\s+/g, " ").slice(0, 120) ?? "",
+                readyState: document.readyState,
             };
         }, WEBPACK_CHUNK_PREFIX).catch(() =>
         {
             return {
                 hasWebpackRuntime: false,
-                bodyTextPreview: "",
+                readyState: "loading",
             };
         });
 
         if (
             clientState.hasWebpackRuntime
-            && !clientState.bodyTextPreview.includes("视频数据加载中")
-            && Date.now() - startedAt >= 3000
+            && clientState.readyState !== "loading"
+            && Date.now() - startedAt >= MIN_RUNTIME_READY_WAIT_MS
         )
         {
             return;
         }
 
-        await page.waitForTimeout(500);
+        await page.waitForTimeout(250);
     }
 }
 
@@ -183,6 +309,7 @@ async function FetchTopLevelCommentsViaWebpackAsync(page, videoId, maxComments, 
         maxTopLevelComments,
         webpackChunkPrefix,
         startCursor,
+        requestTimeoutMs,
     }) =>
     {
         function GetWebpackRequire()
@@ -254,11 +381,20 @@ async function FetchTopLevelCommentsViaWebpackAsync(page, videoId, maxComments, 
 
         while (hasMore && commentsById.size < maxTopLevelComments && pageCount < 40)
         {
-            const pageResult = await fetchCommentList({
-                awemeId: videoId,
-                cursor,
-                count: pageSize,
-            });
+            const pageResult = await Promise.race([
+                fetchCommentList({
+                    awemeId: videoId,
+                    cursor,
+                    count: pageSize,
+                }),
+                new Promise((_, reject) =>
+                {
+                    setTimeout(() =>
+                    {
+                        reject(new Error("Douyin webpack comment request timeout."));
+                    }, requestTimeoutMs);
+                }),
+            ]);
 
             const comments = Array.isArray(pageResult?.comments) ? pageResult.comments : [];
 
@@ -299,12 +435,13 @@ async function FetchTopLevelCommentsViaWebpackAsync(page, videoId, maxComments, 
         startCursor,
         commentListPath: COMMENT_LIST_PATH,
         commentReplyListPath: COMMENT_REPLY_LIST_PATH,
+        requestTimeoutMs: INTERNAL_COMMENT_REQUEST_TIMEOUT_MS,
     });
 }
 
 async function FetchTopLevelCommentsViaCapturedApiAsync(page, videoId, maxComments, startCursor, bootstrapApiUrl)
 {
-    return page.evaluate(async ({ bootstrapApiUrl, pageSize, videoId, maxTopLevelComments, startCursor }) =>
+    return page.evaluate(async ({ bootstrapApiUrl, pageSize, videoId, maxTopLevelComments, startCursor, requestTimeoutMs }) =>
     {
         const commentsById = new Map();
         let cursor = startCursor;
@@ -320,14 +457,29 @@ async function FetchTopLevelCommentsViaCapturedApiAsync(page, videoId, maxCommen
             requestUrl.searchParams.set("cursor", String(cursor));
             requestUrl.searchParams.set("count", String(pageSize));
 
-            const response = await fetch(requestUrl.toString(),
+            const controller = new AbortController();
+            const timeoutId = setTimeout(() =>
             {
-                credentials: "include",
-                headers:
+                controller.abort();
+            }, requestTimeoutMs);
+            let response;
+
+            try
+            {
+                response = await fetch(requestUrl.toString(),
                 {
-                    accept: "application/json, text/plain, */*",
-                },
-            });
+                    credentials: "include",
+                    headers:
+                    {
+                        accept: "application/json, text/plain, */*",
+                    },
+                    signal: controller.signal,
+                });
+            }
+            finally
+            {
+                clearTimeout(timeoutId);
+            }
 
             if (!response.ok)
             {
@@ -383,7 +535,100 @@ async function FetchTopLevelCommentsViaCapturedApiAsync(page, videoId, maxCommen
         videoId,
         maxTopLevelComments: maxComments > 0 ? maxComments : MAX_TOP_LEVEL_COMMENTS,
         startCursor,
+        requestTimeoutMs: INTERNAL_COMMENT_REQUEST_TIMEOUT_MS,
     });
+}
+
+async function FetchTopLevelCommentsViaNodeApiAsync(context, videoId, maxComments, startCursor, bootstrapApiUrl, refererUrl)
+{
+    const commentsById = new Map();
+    const cookieHeader = await BuildCookieHeaderAsync(context, "https://www.douyin.com");
+    let cursor = startCursor;
+    let hasMore = true;
+    let pageCount = 0;
+    let reportedTotal = 0;
+
+    while (hasMore && commentsById.size < (maxComments > 0 ? maxComments : MAX_TOP_LEVEL_COMMENTS) && pageCount < 40)
+    {
+        const requestUrl = new URL(bootstrapApiUrl);
+        const controller = new AbortController();
+        const timeoutId = setTimeout(() =>
+        {
+            controller.abort();
+        }, INTERNAL_COMMENT_REQUEST_TIMEOUT_MS);
+
+        requestUrl.searchParams.set("aweme_id", videoId);
+        requestUrl.searchParams.set("cursor", String(cursor));
+        requestUrl.searchParams.set("count", String(COMMENT_PAGE_SIZE));
+
+        let response;
+
+        try
+        {
+            response = await fetch(requestUrl.toString(),
+            {
+                headers:
+                {
+                    accept: "application/json, text/plain, */*",
+                    cookie: cookieHeader,
+                    referer: refererUrl,
+                    "user-agent": CONTEXT_OPTIONS.userAgent,
+                },
+                signal: controller.signal,
+            });
+        }
+        finally
+        {
+            clearTimeout(timeoutId);
+        }
+
+        if (!response.ok)
+        {
+            throw new Error(`Douyin direct API trả về HTTP ${response.status}.`);
+        }
+
+        const pageResult = await response.json();
+        const statusCode = Number(pageResult?.status_code ?? 0);
+
+        if (statusCode !== 0)
+        {
+            throw new Error(`Douyin direct API trả về status_code=${statusCode}.`);
+        }
+
+        const comments = Array.isArray(pageResult?.comments) ? pageResult.comments : [];
+
+        for (const comment of comments)
+        {
+            if (comment?.cid)
+            {
+                commentsById.set(comment.cid, comment);
+            }
+        }
+
+        reportedTotal = Number(pageResult?.total ?? reportedTotal ?? 0);
+
+        const nextCursor = Number(pageResult?.cursor ?? cursor);
+        const nextHasMore = Boolean(pageResult?.has_more ?? pageResult?.hasMore);
+
+        if (!nextHasMore || nextCursor === cursor || comments.length === 0)
+        {
+            hasMore = nextHasMore && nextCursor !== cursor && comments.length > 0;
+            cursor = nextCursor;
+            break;
+        }
+
+        cursor = nextCursor;
+        hasMore = nextHasMore;
+        pageCount += 1;
+    }
+
+    return {
+        comments: [...commentsById.values()],
+        reportedTotal,
+        nextCursor: cursor,
+        douyinHasMore: hasMore,
+        source: "douyin-direct-api",
+    };
 }
 
 async function FetchTopLevelCommentsAsync(page, videoId, maxComments, startCursor = 0, commentApiBootstrap = null)
@@ -399,7 +644,7 @@ async function FetchTopLevelCommentsAsync(page, videoId, maxComments, startCurso
         webpackError = firstWebpackError;
     }
 
-    await page.waitForTimeout(2000);
+    await page.waitForTimeout(750);
 
     try
     {
@@ -441,219 +686,71 @@ async function FetchTopLevelCommentsAsync(page, videoId, maxComments, startCurso
     }
 }
 
-async function ProbeReplyStatusAsync(page, videoId, comments)
-{
-    const commentWithReplies = comments.find((comment) =>
-    {
-        return (comment.replyTotal ?? comment.reply_comment_total ?? 0) > 0;
-    });
-
-    if (!commentWithReplies)
-    {
-        return {
-            fetchedReplies: false,
-            blockedByVerification: false,
-            blockCode: "",
-            blockDetails: "",
-            attemptedCommentId: "",
-        };
-    }
-
-    let blockedByVerification = false;
-    let blockDetails = "";
-
-    const responseHandler = async (response) =>
-    {
-        if (!response.url().includes(COMMENT_REPLY_LIST_PATH))
-        {
-            return;
-        }
-
-        const verifyPayload = response.headers()["x-vc-bdturing-parameters"];
-
-        if (verifyPayload)
-        {
-            blockedByVerification = true;
-            blockDetails = verifyPayload;
-        }
-    };
-
-    page.on("response", responseHandler);
-
-    try
-    {
-        try
-        {
-            const replyProbe = await page.evaluate(async ({
-                commentId,
-                commentListPath,
-                commentReplyListPath,
-                pageSize,
-                timeoutMs,
-                videoId,
-                webpackChunkPrefix,
-            }) =>
-            {
-                function GetWebpackRequire()
-                {
-                    const chunkName = Object.keys(window).find((key) =>
-                    {
-                        return key.startsWith(webpackChunkPrefix) || key.startsWith("webpackChunk");
-                    });
-
-                    if (!chunkName)
-                    {
-                        throw new Error("Không tìm thấy webpack runtime của Douyin.");
-                    }
-
-                    let webpackRequire;
-                    window[chunkName].push([[Symbol("dycomment-reply")], {}, (currentRequire) =>
-                    {
-                        webpackRequire = currentRequire;
-                    }]);
-
-                    if (!webpackRequire)
-                    {
-                        throw new Error("Không truy cập được webpack require.");
-                    }
-
-                    return webpackRequire;
-                }
-
-                function GetCommentModule(webpackRequire)
-                {
-                    for (const [moduleId, factory] of Object.entries(webpackRequire.m))
-                    {
-                        const source = String(factory);
-
-                        if (
-                            source.includes(commentListPath)
-                            && source.includes(commentReplyListPath)
-                        )
-                        {
-                            const moduleExports = webpackRequire(moduleId);
-
-                            if (
-                                typeof moduleExports?.iq === "function"
-                                && typeof moduleExports?.rs === "function"
-                            )
-                            {
-                                return moduleExports;
-                            }
-                        }
-                    }
-
-                    throw new Error("Không tìm thấy module comment nội bộ của Douyin.");
-                }
-
-                const webpackRequire = GetWebpackRequire();
-                const commentModule = GetCommentModule(webpackRequire);
-                const fetchReplyList = commentModule.rs;
-
-                if (typeof fetchReplyList !== "function")
-                {
-                    return {
-                        status: "reply-client-not-found",
-                    };
-                }
-
-                const replyResult = await Promise.race([
-                    fetchReplyList({
-                        awemeId: videoId,
-                        commentId,
-                        cursor: 0,
-                        count: pageSize,
-                    }),
-                    new Promise((resolve) =>
-                    {
-                        setTimeout(() =>
-                        {
-                            resolve({
-                                __timeout: true,
-                            });
-                        }, timeoutMs);
-                    }),
-                ]);
-
-                if (replyResult?.__timeout)
-                {
-                    return {
-                        status: "timeout",
-                    };
-                }
-
-                return {
-                    status: "ok",
-                    replyCount: Array.isArray(replyResult?.comments) ? replyResult.comments.length : 0,
-                };
-            },
-            {
-                commentId: commentWithReplies.cid,
-                pageSize: COMMENT_PAGE_SIZE,
-                timeoutMs: REPLY_PROBE_TIMEOUT_MS,
-                videoId,
-                webpackChunkPrefix: WEBPACK_CHUNK_PREFIX,
-                commentListPath: COMMENT_LIST_PATH,
-                commentReplyListPath: COMMENT_REPLY_LIST_PATH,
-            });
-
-            return {
-                fetchedReplies: replyProbe?.status === "ok" && Number(replyProbe.replyCount ?? 0) > 0,
-                blockedByVerification,
-                blockCode: blockedByVerification ? "bdturing" : "",
-                blockDetails,
-                attemptedCommentId: commentWithReplies.cid,
-            };
-        }
-        catch (error)
-        {
-            return {
-                fetchedReplies: false,
-                blockedByVerification,
-                blockCode: blockedByVerification ? "bdturing" : "reply-probe-unavailable",
-                blockDetails: blockedByVerification
-                    ? blockDetails
-                    : error instanceof Error
-                        ? error.message
-                        : "Không rõ lý do.",
-                attemptedCommentId: commentWithReplies.cid,
-            };
-        }
-    }
-    finally
-    {
-        page.off("response", responseHandler);
-    }
-}
-
 export class DouyinService
 {
+    async WarmupAsync()
+    {
+        await GetSharedContextAsync();
+
+        if (config.douyinWarmupVideoUrl && !latestCommentApiTemplateUrl)
+        {
+            await this.GetCommentsAsync(config.douyinWarmupVideoUrl, 1, 0).catch(() =>
+            {
+                return null;
+            });
+        }
+    }
+
+    async CloseAsync()
+    {
+        await CloseSharedPlaywrightAsync();
+    }
+
     async GetCommentsAsync(videoUrl, maxComments = 0, startCursor = 0)
     {
-        const browser = await chromium.launch(
-        {
-            headless: config.playwrightHeadless,
-            timeout: config.playwrightLaunchTimeoutMs,
-            chromiumSandbox: false,
-            args:
-            [
-                "--disable-dev-shm-usage",
-                "--disable-gpu",
-                "--disable-setuid-sandbox",
-                "--no-sandbox",
-            ],
-        });
+        const context = await GetSharedContextAsync();
+        const resolvedUrl = await ResolveShortUrlAsync(videoUrl);
+        const videoId = ExtractVideoId(resolvedUrl);
+        const canonicalVideoUrl = BuildCanonicalVideoUrl(resolvedUrl);
+        const normalizedMaxComments = maxComments > 0 ? maxComments : MAX_TOP_LEVEL_COMMENTS;
 
-        const context = await browser.newContext(
+        if (latestCommentApiTemplateUrl)
         {
-            viewport:
+            try
             {
-                width: 1440,
-                height: 1200,
-            },
-            userAgent: "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36",
-            locale: "zh-CN",
-        });
+                const directApiResult = await WithTimeoutAsync(
+                    FetchTopLevelCommentsViaNodeApiAsync(
+                        context,
+                        videoId,
+                        normalizedMaxComments,
+                        startCursor,
+                        latestCommentApiTemplateUrl,
+                        canonicalVideoUrl,
+                    ),
+                    GET_COMMENTS_TIMEOUT_MS,
+                    "Lấy comment từ Douyin direct API bị quá thời gian chờ.",
+                );
+                const normalizedComments = directApiResult.comments.map((comment, index) =>
+                {
+                    return NormalizeTopLevelComment(comment, index);
+                });
+
+                return {
+                    videoId,
+                    comments: normalizedComments,
+                    source: directApiResult.source,
+                    topLevelCommentCount: normalizedComments.length,
+                    reportedCommentCount: directApiResult.reportedTotal,
+                    nextCursor: directApiResult.nextCursor,
+                    douyinHasMore: directApiResult.douyinHasMore,
+                    replyStatus: null,
+                };
+            }
+            catch
+            {
+                latestCommentApiTemplateUrl = "";
+            }
+        }
 
         const page = await context.newPage();
         const commentApiBootstrap =
@@ -674,13 +771,10 @@ export class DouyinService
             }
 
             commentApiBootstrap.value = url;
+            latestCommentApiTemplateUrl = url;
         };
 
         page.on("response", commentBootstrapResponseHandler);
-
-        const resolvedUrl = await ResolveShortUrlAsync(videoUrl);
-        const videoId = ExtractVideoId(resolvedUrl);
-        const canonicalVideoUrl = BuildCanonicalVideoUrl(resolvedUrl);
 
         try
         {
@@ -703,29 +797,13 @@ export class DouyinService
                 FetchTopLevelCommentsAsync(
                     page,
                     videoId,
-                    maxComments,
+                    normalizedMaxComments,
                     startCursor,
                     commentApiBootstrap,
                 ),
                 GET_COMMENTS_TIMEOUT_MS,
                 "Lấy comment từ Douyin bị quá thời gian chờ.",
             );
-            const replyStatus = startCursor === 0
-                ? await WithTimeoutAsync(
-                    ProbeReplyStatusAsync(page, videoId, topLevelResult.comments),
-                    COMMENT_STEP_TIMEOUT_MS,
-                    "Kiểm tra reply của Douyin quá lâu.",
-                ).catch((error) =>
-                {
-                    return {
-                        fetchedReplies: false,
-                        blockedByVerification: false,
-                        blockCode: "reply-probe-timeout",
-                        blockDetails: error instanceof Error ? error.message : "Không rõ lý do.",
-                        attemptedCommentId: "",
-                    };
-                })
-                : null;
             const normalizedComments = topLevelResult.comments.map((comment, index) =>
             {
                 return NormalizeTopLevelComment(comment, index);
@@ -739,14 +817,16 @@ export class DouyinService
                 reportedCommentCount: topLevelResult.reportedTotal,
                 nextCursor: topLevelResult.nextCursor,
                 douyinHasMore: topLevelResult.douyinHasMore,
-                replyStatus,
+                replyStatus: null,
             };
         }
         finally
         {
             page.off("response", commentBootstrapResponseHandler);
-            await context.close();
-            await browser.close();
+            await page.close().catch(() =>
+            {
+                return null;
+            });
         }
     }
 }

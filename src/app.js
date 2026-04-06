@@ -19,6 +19,12 @@ const translationService = new TranslationService(offlineTranslator, geminiTrans
 // Cache comment đã crawl theo videoId, tránh mở browser lại khi "Tải thêm"
 const commentCache = new Map();
 
+offlineTranslator.EnsureLoaded();
+void douyinService.WarmupAsync().catch((error) =>
+{
+    console.error("Warmup DouyinService thất bại:", error);
+});
+
 app.use(express.json(
 {
     limit: "1mb",

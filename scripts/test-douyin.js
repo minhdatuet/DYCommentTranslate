@@ -28,3 +28,7 @@ catch (error)
     }, null, 2));
     process.exitCode = 1;
 }
+finally
+{
+    await douyinService.CloseAsync();
+}

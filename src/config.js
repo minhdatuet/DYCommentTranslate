@@ -19,5 +19,6 @@ export const config =
     offlineDictDir: process.env.OFFLINE_DICT_DIR ?? DEFAULT_DICT_DIR,
     playwrightHeadless: (process.env.PLAYWRIGHT_HEADLESS ?? "true").toLowerCase() !== "false",
     playwrightLaunchTimeoutMs: Number(process.env.PLAYWRIGHT_LAUNCH_TIMEOUT_MS ?? 30000),
+    douyinWarmupVideoUrl: String(process.env.DOUYIN_WARMUP_VIDEO_URL ?? "").trim(),
     publicDir: path.resolve("public"),
 };
