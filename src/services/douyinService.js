@@ -633,6 +633,15 @@ export class DouyinService
         const browser = await chromium.launch(
         {
             headless: config.playwrightHeadless,
+            timeout: config.playwrightLaunchTimeoutMs,
+            chromiumSandbox: false,
+            args:
+            [
+                "--disable-dev-shm-usage",
+                "--disable-gpu",
+                "--disable-setuid-sandbox",
+                "--no-sandbox",
+            ],
         });
 
         const context = await browser.newContext(

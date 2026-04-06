@@ -18,5 +18,6 @@ export const config =
     stvApiUrl: process.env.STV_API_URL ?? DEFAULT_STV_API_URL,
     offlineDictDir: process.env.OFFLINE_DICT_DIR ?? DEFAULT_DICT_DIR,
     playwrightHeadless: (process.env.PLAYWRIGHT_HEADLESS ?? "true").toLowerCase() !== "false",
+    playwrightLaunchTimeoutMs: Number(process.env.PLAYWRIGHT_LAUNCH_TIMEOUT_MS ?? 30000),
     publicDir: path.resolve("public"),
 };

@@ -1,14 +1,15 @@
-FROM node:24-slim
+FROM mcr.microsoft.com/playwright:v1.59.1-noble
 
-ENV PLAYWRIGHT_BROWSERS_PATH=/ms-playwright
+ENV NODE_ENV=production
 ENV PLAYWRIGHT_HEADLESS=true
+ENV PLAYWRIGHT_LAUNCH_TIMEOUT_MS=30000
 
 WORKDIR /app
 
 COPY package*.json ./
 RUN npm ci --omit=dev
-RUN npx playwright install --with-deps chromium
-RUN apt-get install -y --no-install-recommends fonts-noto-cjk \
+RUN apt-get update \
+    && apt-get install -y --no-install-recommends fonts-noto-cjk \
     && rm -rf /var/lib/apt/lists/*
 
 COPY . .
