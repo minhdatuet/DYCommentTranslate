@@ -101,15 +101,20 @@ app.post("/api/comments", async (request, response) =>
         const startCursor = cached?.nextCursor ?? 0;
         result = await douyinService.GetCommentsAsync(videoUrl, limit, startCursor);
 
-        // Gộp vào cache
+        // Trim kết quả đúng limit (để không trả thừa do page size Douyin)
+        const trimmedComments = limit > 0
+            ? result.comments.slice(0, limit)
+            : result.comments;
+
+        // Gộp vào cache (giữ nguyên tất cả comments đã crawl, kể cả phần thừa)
         const previousComments = cached?.comments ?? [];
-        const allComments = [...previousComments, ...result.comments];
+        const allCrawled = [...previousComments, ...result.comments];
 
         const cacheEntry =
         {
             videoUrl,
             videoId: result.videoId,
-            comments: allComments,
+            comments: allCrawled,
             reportedCommentCount: result.reportedCommentCount,
             replyStatus: cached?.replyStatus ?? result.replyStatus,
             nextCursor: result.nextCursor,
@@ -129,18 +134,18 @@ app.post("/api/comments", async (request, response) =>
         }
 
         const translatedComments = await translationService.TranslateCommentsAsync(
-            result.comments,
+            trimmedComments,
             translationMode,
         );
 
-        const hasMore = result.douyinHasMore;
+        const hasMore = result.douyinHasMore || trimmedComments.length < result.comments.length;
 
         response.json(
         {
             ok: true,
             videoId: result.videoId,
             source: result.source,
-            totalFetched: allComments.length,
+            totalFetched: allCrawled.length,
             reportedCommentCount: result.reportedCommentCount,
             replyStatus: cacheEntry.replyStatus,
             offset: previousComments.length,

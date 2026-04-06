@@ -9,7 +9,7 @@ const commentList = document.getElementById("commentList");
 let currentVideoUrl = "";
 let currentTranslationMode = "";
 let currentLimit = 0;
-let currentOffset = 0;
+let displayedCount = 0;
 let hasMore = false;
 let isLoadingMore = false;
 
@@ -174,17 +174,18 @@ async function LoadMoreComments()
 
     try
     {
-        currentOffset += currentLimit;
         const responseJson = await FetchComments(
             currentVideoUrl,
             currentTranslationMode,
             currentLimit,
-            currentOffset,
+            displayedCount,
         );
+
+        displayedCount += responseJson.comments.length;
 
         AppendComments(responseJson);
         SetStatus(
-            `Đã hiển thị ${currentOffset + responseJson.comments.length}/${responseJson.totalFetched} comment.`,
+            `Đã hiển thị ${displayedCount} comment.`,
             "success",
         );
     }
@@ -196,7 +197,6 @@ async function LoadMoreComments()
             loadMoreButton.textContent = `Tải thêm ${currentLimit} comment`;
         }
 
-        currentOffset -= currentLimit;
         SetStatus(error instanceof Error ? error.message : "Lỗi tải thêm.", "error");
     }
     finally
@@ -213,7 +213,7 @@ commentForm.addEventListener("submit", async (event) =>
     currentVideoUrl = String(formData.get("videoUrl") ?? "").trim();
     currentTranslationMode = String(formData.get("translationMode") ?? "offline").trim();
     currentLimit = Number(formData.get("commentLimit")) || 0;
-    currentOffset = 0;
+    displayedCount = 0;
 
     submitButton.disabled = true;
     SetStatus("Đang tải comment từ Douyin...", "loading");
@@ -224,16 +224,16 @@ commentForm.addEventListener("submit", async (event) =>
             currentVideoUrl,
             currentTranslationMode,
             currentLimit,
-            currentOffset,
+            0,
         );
+
+        displayedCount = responseJson.comments.length;
 
         RenderComments(responseJson);
 
-        const shown = responseJson.comments.length;
-        const total = responseJson.totalFetched;
         const statusText = responseJson.hasMore
-            ? `Hiển thị ${shown}/${total} comment. Bấm "Tải thêm" để xem tiếp.`
-            : `Tải ${shown} comment thành công.`;
+            ? `Hiển thị ${displayedCount} comment. Bấm "Tải thêm" để xem tiếp.`
+            : `Tải ${displayedCount} comment thành công.`;
 
         SetStatus(statusText, "success");
     }
