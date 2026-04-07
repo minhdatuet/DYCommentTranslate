@@ -138,6 +138,7 @@ body
 }
 
 input,
+textarea,
 select,
 button
 {
@@ -149,9 +150,16 @@ button
 }
 
 input,
+textarea,
 select
 {
     background: rgba(255, 255, 255, 0.72);
+}
+
+textarea
+{
+    resize: vertical;
+    min-height: 160px;
 }
 
 button

@@ -8,7 +8,6 @@ const syncCookiesButton = document.getElementById("syncCookiesButton");
 const authStatusText = document.getElementById("authStatusText");
 const API_REQUEST_TIMEOUT_MS = 120000;
 
-// State cho pagination
 let currentVideoUrl = "";
 let currentTranslationMode = "";
 let currentLimit = 0;
@@ -27,26 +26,36 @@ function SetStatus(message, variant)
 function SetAuthState(authStatus)
 {
     hasDouyinAuth = Boolean(authStatus?.isLoggedIn);
+    const hasUsableCookies = Boolean(authStatus?.hasUsableCookies);
+    const syncedAt = authStatus?.lastSyncedAt
+        ? new Date(authStatus.lastSyncedAt).toLocaleString("vi-VN")
+        : "";
 
     if (hasDouyinAuth)
     {
-        const syncedAt = authStatus?.lastSyncedAt
-            ? new Date(authStatus.lastSyncedAt).toLocaleString("vi-VN")
-            : "";
         authStatusText.textContent = syncedAt
-            ? `Đã đồng bộ cookie. Lần gần nhất: ${syncedAt}`
-            : "Đã đồng bộ cookie Douyin.";
+            ? `Đã đăng nhập Douyin. Lần đồng bộ gần nhất: ${syncedAt}`
+            : "Đã đăng nhập Douyin và sẵn sàng tải reply.";
         syncCookiesButton.hidden = true;
         return;
     }
 
-    authStatusText.textContent = "Chưa có cookie Douyin đăng nhập. Reply và comment đầy đủ có thể bị giới hạn.";
+    if (hasUsableCookies)
+    {
+        authStatusText.textContent = syncedAt
+            ? `Đang dùng guest cookie. Có thể tải comment công khai, nhưng reply vẫn cần đăng nhập.`
+            : "Đang dùng guest cookie. Có thể tải comment công khai, nhưng reply vẫn cần đăng nhập.";
+        syncCookiesButton.hidden = false;
+        return;
+    }
+
+    authStatusText.textContent = "Chưa có cookie Douyin đăng nhập. Comment công khai vẫn có thể chạy, nhưng reply sẽ bị giới hạn.";
     syncCookiesButton.hidden = false;
 }
 
 function EscapeHtml(text)
 {
-    return text
+    return String(text ?? "")
         .replaceAll("&", "&amp;")
         .replaceAll("<", "&lt;")
         .replaceAll(">", "&gt;")
@@ -187,7 +196,6 @@ function RenderComments(payload)
 function AppendComments(payload)
 {
     RemoveLoadMoreButton();
-
     commentList.insertAdjacentHTML("beforeend", RenderCommentCards(payload.comments));
 
     hasMore = payload.hasMore;
@@ -254,7 +262,8 @@ async function FetchReplies(videoUrl, commentId, translationMode, limit)
         {
             "Content-Type": "application/json",
         },
-        body: JSON.stringify({
+        body: JSON.stringify(
+        {
             videoUrl,
             commentId,
             translationMode,
@@ -326,12 +335,8 @@ async function LoadMoreComments()
         );
 
         displayedCount += responseJson.comments.length;
-
         AppendComments(responseJson);
-        SetStatus(
-            `Đã hiển thị ${displayedCount} comment.`,
-            "success",
-        );
+        SetStatus(`Đã hiển thị ${displayedCount} comment.`, "success");
     }
     catch (error)
     {
@@ -416,7 +421,7 @@ commentList.addEventListener("click", async (event) =>
 
         if (!responseJson.replies.length)
         {
-            replySlot.innerHTML = `<div class="reply-empty">Không tải được phản hồi hoặc comment không có phản hồi công khai.</div>`;
+            replySlot.innerHTML = "<div class=\"reply-empty\">Không tải được phản hồi hoặc comment không có phản hồi công khai.</div>";
         }
         else
         {
@@ -479,7 +484,6 @@ commentForm.addEventListener("submit", async (event) =>
         );
 
         displayedCount = responseJson.comments.length;
-
         RenderComments(responseJson);
 
         const statusText = responseJson.hasMore
