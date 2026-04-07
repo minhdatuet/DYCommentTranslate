@@ -786,6 +786,7 @@ async function FetchRepliesViaWebpackAsync(page, videoId, commentTargets)
         videoId,
         webpackChunkPrefix,
         requestTimeoutMs,
+        replyRequestTimeoutMs,
     }) =>
     {
         function GetWebpackRequire()
@@ -845,6 +846,9 @@ async function FetchRepliesViaWebpackAsync(page, videoId, commentTargets)
         const fetchReplyList = commentModule.rs;
         const replyMap = {};
 
+        // Cho Douyin client thêm thời gian khởi động trước khi gọi reply API
+        await new Promise((resolve) => setTimeout(resolve, 1500));
+
         for (const target of commentTargets)
         {
             const repliesById = new Map();
@@ -866,7 +870,7 @@ async function FetchRepliesViaWebpackAsync(page, videoId, commentTargets)
                         setTimeout(() =>
                         {
                             reject(new Error(`Reply request timeout for ${target.commentId}`));
-                        }, requestTimeoutMs);
+                        }, replyRequestTimeoutMs);
                     }),
                 ]);
 
@@ -907,94 +911,128 @@ async function FetchRepliesViaWebpackAsync(page, videoId, commentTargets)
         videoId,
         webpackChunkPrefix: WEBPACK_CHUNK_PREFIX,
         requestTimeoutMs: INTERNAL_COMMENT_REQUEST_TIMEOUT_MS,
+        replyRequestTimeoutMs: 25000,
     });
 }
 
-async function FetchRepliesViaNodeApiAsync(context, videoId, commentId, maxReplies, replyApiTemplateUrl, refererUrl)
+async function FetchRepliesViaCapturedApiAsync(page, videoId, commentId, maxReplies, bootstrapApiUrl)
 {
-    const repliesById = new Map();
-    const cookieHeader = await BuildCookieHeaderAsync(context, "https://www.douyin.com");
-    let cursor = 0;
-    let hasMore = true;
-    let pageCount = 0;
-
-    while (hasMore && repliesById.size < (maxReplies > 0 ? maxReplies : MAX_TOP_LEVEL_COMMENTS) && pageCount < 40)
+    return page.evaluate(async ({ bootstrapApiUrl, replyPath, pageSize, videoId, commentId, maxReplies, requestTimeoutMs }) =>
     {
-        const requestUrl = new URL(replyApiTemplateUrl);
-        const controller = new AbortController();
-        const timeoutId = setTimeout(() =>
+        const repliesById = new Map();
+        let cursor = 0;
+        let hasMore = true;
+        let pageCount = 0;
+
+        // Xây URL reply: ưu tiên dùng URL thực capture được, fallback sang URL thuần
+        function BuildReplyUrl(cursor, count)
         {
-            controller.abort();
-        }, INTERNAL_COMMENT_REQUEST_TIMEOUT_MS);
+            let base;
 
-        requestUrl.searchParams.set("aweme_id", videoId);
-        requestUrl.searchParams.set("comment_id", commentId);
-        requestUrl.searchParams.set("cursor", String(cursor));
-        requestUrl.searchParams.set("count", String(COMMENT_PAGE_SIZE));
-
-        let response;
-
-        try
-        {
-            response = await fetch(requestUrl.toString(),
+            if (bootstrapApiUrl && bootstrapApiUrl.includes(replyPath))
             {
-                headers:
-                {
-                    accept: "application/json, text/plain, */*",
-                    cookie: cookieHeader,
-                    referer: refererUrl,
-                    "user-agent": CONTEXT_OPTIONS.userAgent,
-                },
-                signal: controller.signal,
-            });
-        }
-        finally
-        {
-            clearTimeout(timeoutId);
-        }
-
-        if (!response.ok)
-        {
-            throw new Error(`Douyin reply direct API trả về HTTP ${response.status}.`);
-        }
-
-        const pageResult = await response.json();
-        const statusCode = Number(pageResult?.status_code ?? 0);
-
-        if (statusCode !== 0)
-        {
-            throw new Error(`Douyin reply direct API trả về status_code=${statusCode}.`);
-        }
-
-        const replies = Array.isArray(pageResult?.comments) ? pageResult.comments : [];
-
-        for (const reply of replies)
-        {
-            if (reply?.cid)
-            {
-                repliesById.set(reply.cid, reply);
+                // URL thực từ Douyin response — có đầy đủ signed params
+                base = new URL(bootstrapApiUrl);
             }
+            else
+            {
+                // Build URL thuần từ origin Douyin
+                base = new URL(replyPath, "https://www.douyin.com");
+            }
+
+            base.searchParams.set("aweme_id", videoId);
+            base.searchParams.set("comment_id", commentId);
+            base.searchParams.set("cursor", String(cursor));
+            base.searchParams.set("count", String(count));
+            return base.toString();
         }
 
-        const nextCursor = Number(pageResult?.cursor ?? cursor);
-        const nextHasMore = Boolean(pageResult?.has_more ?? pageResult?.hasMore);
-
-        if (!nextHasMore || nextCursor === cursor || replies.length === 0)
+        while (hasMore && repliesById.size < (maxReplies > 0 ? maxReplies : 400) && pageCount < 40)
         {
-            hasMore = nextHasMore && nextCursor !== cursor && replies.length > 0;
+            const requestUrl = BuildReplyUrl(cursor, pageSize);
+            const controller = new AbortController();
+            const timeoutId = setTimeout(() =>
+            {
+                controller.abort();
+            }, requestTimeoutMs);
+            let response;
+
+            try
+            {
+                response = await fetch(requestUrl,
+                {
+                    credentials: "include",
+                    headers:
+                    {
+                        accept: "application/json, text/plain, */*",
+                        referer: location.href,
+                    },
+                    signal: controller.signal,
+                });
+            }
+            finally
+            {
+                clearTimeout(timeoutId);
+            }
+
+            if (!response.ok)
+            {
+                throw new Error(`Douyin reply API trả về HTTP ${response.status}.`);
+            }
+
+            const text = await response.text();
+
+            if (!text || !text.trim())
+            {
+                throw new Error("Douyin reply API trả về body rỗng (có thể bị block).");
+            }
+
+            const pageResult = JSON.parse(text);
+            const statusCode = Number(pageResult?.status_code ?? 0);
+
+            if (statusCode !== 0)
+            {
+                throw new Error(`Douyin reply API trả về status_code=${statusCode}.`);
+            }
+
+            const replies = Array.isArray(pageResult?.comments) ? pageResult.comments : [];
+
+            for (const reply of replies)
+            {
+                if (reply?.cid)
+                {
+                    repliesById.set(reply.cid, reply);
+                }
+            }
+
+            const nextCursor = Number(pageResult?.cursor ?? cursor);
+            const nextHasMore = Boolean(pageResult?.has_more ?? pageResult?.hasMore);
+
+            if (!nextHasMore || nextCursor === cursor || replies.length === 0)
+            {
+                hasMore = nextHasMore && nextCursor !== cursor && replies.length > 0;
+                cursor = nextCursor;
+                break;
+            }
+
             cursor = nextCursor;
-            break;
+            hasMore = nextHasMore;
+            pageCount += 1;
         }
 
-        cursor = nextCursor;
-        hasMore = nextHasMore;
-        pageCount += 1;
-    }
-
-    return {
-        replies: [...repliesById.values()],
-        source: "douyin-direct-reply-api",
-    };
+        return {
+            replies: [...repliesById.values()],
+        };
+    },
+    {
+        bootstrapApiUrl,
+        replyPath: COMMENT_REPLY_LIST_PATH,
+        pageSize: COMMENT_PAGE_SIZE,
+        videoId,
+        commentId,
+        maxReplies,
+        requestTimeoutMs: INTERNAL_COMMENT_REQUEST_TIMEOUT_MS,
+    });
 }
 
 async function WaitForLoginCookiesAsync(context)
@@ -1137,48 +1175,7 @@ export class DouyinService
         const videoId = ExtractVideoId(resolvedUrl);
         const canonicalVideoUrl = BuildCanonicalVideoUrl(resolvedUrl);
 
-        // Thử dùng Node API trực tiếp nếu đã có template URL (nhanh hơn, không cần mở page)
-        if (latestReplyApiTemplateUrl)
-        {
-            try
-            {
-                const directResult = await WithTimeoutAsync(
-                    FetchRepliesViaNodeApiAsync(
-                        context,
-                        videoId,
-                        commentId,
-                        maxReplies,
-                        latestReplyApiTemplateUrl,
-                        canonicalVideoUrl,
-                    ),
-                    GET_COMMENTS_TIMEOUT_MS,
-                    "Lấy phản hồi qua direct API bị quá thời gian chờ.",
-                );
-                const rawReplies = directResult.replies;
-                const trimmedReplies = maxReplies > 0 ? rawReplies.slice(0, maxReplies) : rawReplies;
-                const normalizedReplies = trimmedReplies.map((reply, index) =>
-                {
-                    return NormalizeReplyComment(reply, index);
-                });
-
-                return {
-                    replies: normalizedReplies,
-                    replyStatus:
-                    {
-                        fetchedReplies: normalizedReplies.length > 0,
-                        requiresLogin: false,
-                        blockedByVerification: false,
-                        fetchedReplyCommentCount: normalizedReplies.length,
-                    },
-                };
-            }
-            catch
-            {
-                latestReplyApiTemplateUrl = "";
-            }
-        }
-
-        // Fallback: mở Playwright page và dùng webpack
+        // Mở Playwright page, dùng webpack trước và fallback sang in-browser captured API
         const page = await context.newPage();
         const replyApiBootstrap = { value: "" };
         const replyBootstrapResponseHandler = (response) =>
@@ -1211,6 +1208,9 @@ export class DouyinService
                 "Douyin tải client quá lâu khi lấy phản hồi.",
             );
 
+            // Chờ Douyin client khởi tạo xong và warm up session
+            await page.waitForTimeout(2000);
+
             let rawReplies = [];
             let webpackError;
 
@@ -1233,39 +1233,32 @@ export class DouyinService
             {
                 webpackError = firstError;
 
-                // Fallback trong page: dùng captured API URL nếu có
-                if (replyApiBootstrap.value || latestReplyApiTemplateUrl)
+                // Fallback: luôn thử in-browser fetch (credentials:include),
+                // FetchRepliesViaCapturedApiAsync tự build URL nếu không có URL thực
+                const fallbackUrl = replyApiBootstrap.value || latestReplyApiTemplateUrl || "";
+
+                try
                 {
-                    const fallbackUrl = replyApiBootstrap.value || latestReplyApiTemplateUrl;
-
-                    try
-                    {
-                        const directResult = await WithTimeoutAsync(
-                            FetchRepliesViaNodeApiAsync(
-                                context,
-                                videoId,
-                                commentId,
-                                maxReplies,
-                                fallbackUrl,
-                                canonicalVideoUrl,
-                            ),
-                            GET_COMMENTS_TIMEOUT_MS,
-                            "Lấy phản hồi fallback API bị quá thời gian chờ.",
-                        );
-                        rawReplies = directResult.replies;
-                        webpackError = null;
-                    }
-                    catch (apiError)
-                    {
-                        const webpackMsg = webpackError instanceof Error ? webpackError.message : "Không rõ lý do.";
-                        const apiMsg = apiError instanceof Error ? apiError.message : "Không rõ lý do.";
-
-                        throw new Error(`Lấy phản hồi thất bại qua webpack (${webpackMsg}) và fallback API (${apiMsg}).`);
-                    }
+                    const capturedResult = await WithTimeoutAsync(
+                        FetchRepliesViaCapturedApiAsync(
+                            page,
+                            videoId,
+                            commentId,
+                            maxReplies,
+                            fallbackUrl,
+                        ),
+                        GET_COMMENTS_TIMEOUT_MS,
+                        "Lấy phản hồi qua in-browser API bị quá thời gian chờ.",
+                    );
+                    rawReplies = capturedResult.replies;
+                    webpackError = null;
                 }
-                else
+                catch (apiError)
                 {
-                    throw webpackError;
+                    const webpackMsg = webpackError instanceof Error ? webpackError.message : "Không rõ lý do.";
+                    const apiMsg = apiError instanceof Error ? apiError.message : "Không rõ lý do.";
+
+                    throw new Error(`Lấy phản hồi thất bại: webpack (${webpackMsg}) | in-browser API (${apiMsg}).`);
                 }
             }
 
