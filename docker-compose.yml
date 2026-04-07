@@ -1,0 +1,13 @@
+services:
+    dycomment:
+        build:
+            context: .
+            dockerfile: Dockerfile
+        restart: unless-stopped
+        env_file:
+            - .env
+        ports:
+            - "127.0.0.1:3000:3000"
+        volumes:
+            - ./.cache:/app/.cache
+            - ./dict:/app/dict:ro

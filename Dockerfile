@@ -1,4 +1,4 @@
-FROM mcr.microsoft.com/playwright:v1.59.1-noble
+FROM node:24-bookworm-slim
 
 ENV NODE_ENV=production
 ENV PLAYWRIGHT_HEADLESS=true
@@ -8,6 +8,10 @@ WORKDIR /app
 
 COPY package*.json ./
 RUN npm ci --omit=dev
+
+# Cài Chromium + dependencies cho Playwright (chỉ cần khi dùng SyncCookies/fallback browser).
+RUN npx playwright install --with-deps chromium
+
 RUN apt-get update \
     && apt-get install -y --no-install-recommends fonts-noto-cjk \
     && rm -rf /var/lib/apt/lists/*
