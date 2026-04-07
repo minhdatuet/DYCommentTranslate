@@ -13,6 +13,9 @@ const DEFAULT_STV_API_URL = "https://comic.sangtacvietcdn.xyz/tsm.php?cdn=";
 export const config =
 {
     port: Number(process.env.PORT ?? 3000),
+    douyinCommentApiTemplateUrl: String(process.env.DOUYIN_COMMENT_API_TEMPLATE_URL ?? "").trim(),
+    douyinReplyApiTemplateUrl: String(process.env.DOUYIN_REPLY_API_TEMPLATE_URL ?? "").trim(),
+    douyinDirectApiStatePath: path.resolve(".cache", "douyin-direct-api-state.json"),
     geminiApiKey: process.env.GEMINI_API_KEY ?? "",
     geminiModel: process.env.GEMINI_MODEL ?? "gemini-2.5-flash",
     stvApiUrl: process.env.STV_API_URL ?? DEFAULT_STV_API_URL,
