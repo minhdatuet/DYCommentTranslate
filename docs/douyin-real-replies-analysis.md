@@ -36,8 +36,6 @@ Các tham số lõi:
 - DouyinApiDoc/Postman cũ: endpoint `comment/list/reply` dùng `item_id`.
 - Douyin Open Platform: có API chính thức lấy comment reply, nhưng cần OAuth scope và
   quyền dữ liệu comment.
-- EnsembleData/JustOneApi: các API trung gian đều dùng mô hình lấy comment cấp 1 trước,
-  sau đó gọi reply theo từng `comment_id` và phân trang bằng cursor/page.
 
 ## Kết quả thử với video mẫu
 
@@ -107,17 +105,6 @@ browser context thật.
 - Dùng API `GET /item/comment/reply/list/`.
 - Cần OAuth access token, scope comment và quyền dữ liệu comment.
 - Chỉ phù hợp nếu tài khoản/app có quyền xem dữ liệu video liên quan.
-
-### Phương án 3: API trung gian
-
-`JustOneApi` hoặc dịch vụ tương tự có thể trả reply bằng endpoint kiểu:
-
-```text
-GET /api/douyin/get-video-sub-comment/v1?token=...&commentId=...&page=1
-```
-
-Repo hiện đã có `JustOneApiDouyinService`, nên nếu có token thì đây là đường nhanh nhất để
-kiểm chứng reply thật mà không phụ thuộc Playwright/challenge của Douyin web.
 
 ## Việc đã chỉnh trong repo
 

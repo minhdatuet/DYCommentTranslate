@@ -1,27 +1,55 @@
+const cookieForm = document.getElementById("cookieForm");
+const cookieTextInput = document.getElementById("cookieText");
 const commentForm = document.getElementById("commentForm");
 const submitButton = document.getElementById("submitButton");
 const statusBox = document.getElementById("statusBox");
 const resultTitle = document.getElementById("resultTitle");
 const resultMeta = document.getElementById("resultMeta");
 const commentList = document.getElementById("commentList");
+const authActions = document.getElementById("authActions");
+const autoLoginButton = document.getElementById("autoLoginButton");
+const manualCookieButton = document.getElementById("manualCookieButton");
+const loginFlowPanel = document.getElementById("loginFlowPanel");
+const loginFlowStatus = document.getElementById("loginFlowStatus");
+const loginFlowScreenshot = document.getElementById("loginFlowScreenshot");
+const loginFlowTextInput = document.getElementById("loginFlowTextInput");
+const sendLoginFlowTextButton = document.getElementById("sendLoginFlowTextButton");
+const cancelLoginFlowButton = document.getElementById("cancelLoginFlowButton");
 const syncCookiesButton = document.getElementById("syncCookiesButton");
+const clearSessionButton = document.getElementById("clearSessionButton");
 const authStatusText = document.getElementById("authStatusText");
 const API_REQUEST_TIMEOUT_MS = 120000;
+const DEFAULT_COMMENT_LIMIT = 20;
+const LOGIN_FLOW_POLL_MS = 2000;
+const LOGIN_FLOW_SCREENSHOT_MS = 2500;
 
 let currentVideoUrl = "";
 let currentTranslationMode = "";
-let currentCommentSource = "douyin";
-let currentLimit = 0;
+let currentLimit = DEFAULT_COMMENT_LIMIT;
+let currentCursor = 0;
 let displayedCount = 0;
 let hasMore = false;
 let isLoadingMore = false;
 let hasDouyinAuth = false;
 let currentReplyLimit = 50;
+let loginFlowId = "";
+let loginFlowStatusTimer = 0;
+let loginFlowScreenshotTimer = 0;
 
 function SetStatus(message, variant)
 {
     statusBox.textContent = message;
     statusBox.className = `status-box ${variant}`;
+}
+
+function SetCommentFormEnabled(isEnabled)
+{
+    for (const element of commentForm.elements)
+    {
+        element.disabled = !isEnabled;
+    }
+
+    submitButton.disabled = !isEnabled;
 }
 
 function SetAuthState(authStatus)
@@ -35,21 +63,28 @@ function SetAuthState(authStatus)
     if (hasDouyinAuth)
     {
         authStatusText.textContent = syncedAt
-            ? `Đã đăng nhập Douyin. Lần đồng bộ gần nhất: ${syncedAt}`
-            : "Đã đăng nhập Douyin và sẵn sàng tải reply.";
-        syncCookiesButton.hidden = true;
+            ? `Đã sync cookie Douyin. Cập nhật: ${syncedAt}`
+            : "Đã sync cookie Douyin.";
+        authActions.hidden = true;
+        cookieForm.hidden = true;
+        loginFlowPanel.hidden = true;
+        clearSessionButton.hidden = false;
+        SetCommentFormEnabled(true);
         return;
     }
 
     if (hasUsableCookies)
     {
-        authStatusText.textContent = "Đang dùng guest cookie. Có thể tải comment công khai, nhưng reply vẫn cần đăng nhập.";
-        syncCookiesButton.hidden = false;
-        return;
+        authStatusText.textContent = "Cookie chưa đủ trạng thái đăng nhập để lấy reply.";
+    }
+    else
+    {
+        authStatusText.textContent = "Cần cookie Douyin đã đăng nhập trước khi tải comment.";
     }
 
-    authStatusText.textContent = "Chưa có cookie Douyin đăng nhập. Comment công khai vẫn có thể chạy, nhưng reply sẽ bị giới hạn.";
-    syncCookiesButton.hidden = false;
+    authActions.hidden = false;
+    clearSessionButton.hidden = true;
+    SetCommentFormEnabled(false);
 }
 
 function EscapeHtml(text)
@@ -162,29 +197,30 @@ function AppendLoadMoreButton()
     commentList.appendChild(button);
 }
 
-function RenderComments(payload)
+function BuildMetaItems(payload)
 {
-    resultTitle.textContent = `Bình luận (${payload.topLevelCommentCount || payload.totalFetched || 0})`;
     const metaItems =
     [
-        `Douyin báo ${payload.reportedCommentCount || payload.totalFetched} comment`,
-        `Nguồn: ${payload.source}`,
+        `Douyin báo ${payload.reportedCommentCount || payload.totalFetched || 0} comment`,
+        "Nguồn: Douyin user cookie",
     ];
 
     if (payload.replyStatus?.blockedByVerification)
     {
-        metaItems.push("Reply bị Douyin chặn bằng verify");
+        metaItems.push("Reply bị Douyin chặn verify");
     }
     else if (payload.replyStatus?.fetchedReplies)
     {
         metaItems.push(`Đã lấy ${payload.replyStatus.fetchedReplyCommentCount} reply`);
     }
-    else if (payload.replyStatus?.requiresLogin)
-    {
-        metaItems.push("Reply cần cookie đăng nhập");
-    }
 
-    resultMeta.innerHTML = metaItems.map((item) =>
+    return metaItems;
+}
+
+function RenderComments(payload)
+{
+    resultTitle.textContent = `Bình luận (${payload.totalFetched || payload.comments.length || 0})`;
+    resultMeta.innerHTML = BuildMetaItems(payload).map((item) =>
     {
         return `<span>${EscapeHtml(item)}</span>`;
     }).join("");
@@ -198,8 +234,8 @@ function RenderComments(payload)
 
     commentList.className = "comment-list";
     commentList.innerHTML = RenderCommentCards(payload.comments);
-
-    hasMore = payload.hasMore;
+    currentCursor = Number(payload.nextCursor || 0);
+    hasMore = Boolean(payload.hasMore);
 
     if (hasMore)
     {
@@ -211,8 +247,8 @@ function AppendComments(payload)
 {
     RemoveLoadMoreButton();
     commentList.insertAdjacentHTML("beforeend", RenderCommentCards(payload.comments));
-
-    hasMore = payload.hasMore;
+    currentCursor = Number(payload.nextCursor || currentCursor);
+    hasMore = Boolean(payload.hasMore);
 
     if (hasMore)
     {
@@ -220,7 +256,20 @@ function AppendComments(payload)
     }
 }
 
-async function FetchComments(videoUrl, translationMode, limit, offset)
+async function FetchJsonAsync(url, options = {})
+{
+    const response = await fetch(url, options);
+    const responseJson = await response.json();
+
+    if (!response.ok || !responseJson.ok)
+    {
+        throw new Error(responseJson.error || "Yêu cầu thất bại.");
+    }
+
+    return responseJson;
+}
+
+async function FetchComments(videoUrl, translationMode, limit, cursor, indexOffset)
 {
     const controller = new AbortController();
     const timeoutId = setTimeout(() =>
@@ -228,18 +277,16 @@ async function FetchComments(videoUrl, translationMode, limit, offset)
         controller.abort();
     }, API_REQUEST_TIMEOUT_MS);
 
-    let response;
-
     try
     {
-        response = await fetch("/api/comments",
+        return await FetchJsonAsync("/api/comments",
         {
             method: "POST",
             headers:
             {
                 "Content-Type": "application/json",
             },
-            body: JSON.stringify({ videoUrl, translationMode, limit, offset, source: currentCommentSource }),
+            body: JSON.stringify({ videoUrl, translationMode, limit, cursor, indexOffset }),
             signal: controller.signal,
         });
     }
@@ -256,20 +303,11 @@ async function FetchComments(videoUrl, translationMode, limit, offset)
     {
         clearTimeout(timeoutId);
     }
-
-    const responseJson = await response.json();
-
-    if (!response.ok || !responseJson.ok)
-    {
-        throw new Error(responseJson.error || "Không thể lấy comment.");
-    }
-
-    return responseJson;
 }
 
 async function FetchReplies(videoUrl, commentId, translationMode, limit)
 {
-    const response = await fetch("/api/comment-replies",
+    return FetchJsonAsync("/api/comment-replies",
     {
         method: "POST",
         headers:
@@ -282,46 +320,153 @@ async function FetchReplies(videoUrl, commentId, translationMode, limit)
             commentId,
             translationMode,
             limit,
-            source: currentCommentSource,
         }),
     });
-    const responseJson = await response.json();
-
-    if (!response.ok || !responseJson.ok)
-    {
-        throw new Error(responseJson.error || "Không thể lấy phản hồi.");
-    }
-
-    return responseJson;
 }
 
 async function FetchAuthStatus()
 {
-    const response = await fetch("/api/douyin/auth-status");
-    const responseJson = await response.json();
-
-    if (!response.ok || !responseJson.ok)
-    {
-        throw new Error(responseJson.error || "Không đọc được trạng thái cookie Douyin.");
-    }
-
-    return responseJson;
+    return FetchJsonAsync("/api/douyin/auth-status");
 }
 
-async function SyncCookiesAsync()
+async function SyncCookiesAsync(cookieText)
 {
-    const response = await fetch("/api/douyin/sync-cookies",
+    return FetchJsonAsync("/api/douyin/session",
+    {
+        method: "POST",
+        headers:
+        {
+            "Content-Type": "application/json",
+        },
+        body: JSON.stringify({ cookieHeader: cookieText }),
+    });
+}
+
+async function ClearSessionAsync()
+{
+    return FetchJsonAsync("/api/douyin/session",
+    {
+        method: "DELETE",
+    });
+}
+
+async function StartLoginFlowAsync()
+{
+    return FetchJsonAsync("/api/douyin/login-flow",
     {
         method: "POST",
     });
-    const responseJson = await response.json();
+}
 
-    if (!response.ok || !responseJson.ok)
+async function FetchLoginFlowStatusAsync(flowId)
+{
+    return FetchJsonAsync(`/api/douyin/login-flow/${encodeURIComponent(flowId)}/status`);
+}
+
+async function StopLoginFlowAsync(flowId)
+{
+    return FetchJsonAsync(`/api/douyin/login-flow/${encodeURIComponent(flowId)}`,
     {
-        throw new Error(responseJson.error || "Đồng bộ cookie thất bại.");
+        method: "DELETE",
+    });
+}
+
+async function ClickLoginFlowAsync(flowId, x, y)
+{
+    return FetchJsonAsync(`/api/douyin/login-flow/${encodeURIComponent(flowId)}/click`,
+    {
+        method: "POST",
+        headers:
+        {
+            "Content-Type": "application/json",
+        },
+        body: JSON.stringify({ x, y }),
+    });
+}
+
+async function TypeLoginFlowTextAsync(flowId, text)
+{
+    return FetchJsonAsync(`/api/douyin/login-flow/${encodeURIComponent(flowId)}/type`,
+    {
+        method: "POST",
+        headers:
+        {
+            "Content-Type": "application/json",
+        },
+        body: JSON.stringify({ text }),
+    });
+}
+
+async function PressLoginFlowKeyAsync(flowId, key)
+{
+    return FetchJsonAsync(`/api/douyin/login-flow/${encodeURIComponent(flowId)}/key`,
+    {
+        method: "POST",
+        headers:
+        {
+            "Content-Type": "application/json",
+        },
+        body: JSON.stringify({ key }),
+    });
+}
+
+function StopLoginFlowPolling()
+{
+    if (loginFlowStatusTimer)
+    {
+        clearInterval(loginFlowStatusTimer);
+        loginFlowStatusTimer = 0;
     }
 
-    return responseJson;
+    if (loginFlowScreenshotTimer)
+    {
+        clearInterval(loginFlowScreenshotTimer);
+        loginFlowScreenshotTimer = 0;
+    }
+}
+
+function RefreshLoginFlowScreenshot()
+{
+    if (!loginFlowId)
+    {
+        return;
+    }
+
+    loginFlowScreenshot.src = `/api/douyin/login-flow/${encodeURIComponent(loginFlowId)}/screenshot?t=${Date.now()}`;
+}
+
+async function PollLoginFlowStatus()
+{
+    if (!loginFlowId)
+    {
+        return;
+    }
+
+    try
+    {
+        const flowStatus = await FetchLoginFlowStatusAsync(loginFlowId);
+
+        if (flowStatus.completed || flowStatus.isLoggedIn)
+        {
+            StopLoginFlowPolling();
+            loginFlowId = "";
+            loginFlowPanel.hidden = true;
+            loginFlowScreenshot.removeAttribute("src");
+            SetAuthState(flowStatus);
+            SetStatus("Đã lấy cookie Douyin tự động. Có thể tải comment và reply.", "success");
+            return;
+        }
+
+        const secondsLeft = Math.max(0, Math.ceil(Number(flowStatus.expiresInMs || 0) / 1000));
+        loginFlowStatus.textContent = `Đang chờ đăng nhập Douyin (${secondsLeft}s).`;
+    }
+    catch (error)
+    {
+        StopLoginFlowPolling();
+        loginFlowId = "";
+        loginFlowStatus.textContent = error instanceof Error ? error.message : "Phiên đăng nhập đã dừng.";
+        SetStatus(error instanceof Error ? error.message : "Phiên đăng nhập đã dừng.", "error");
+    }
 }
 
 async function LoadMoreComments()
@@ -346,6 +491,7 @@ async function LoadMoreComments()
             currentVideoUrl,
             currentTranslationMode,
             currentLimit,
+            currentCursor,
             displayedCount,
         );
 
@@ -369,24 +515,183 @@ async function LoadMoreComments()
     }
 }
 
-syncCookiesButton.addEventListener("click", async () =>
+manualCookieButton.addEventListener("click", () =>
 {
-    syncCookiesButton.disabled = true;
-    SetStatus("Đang mở cửa sổ Douyin để đăng nhập và đồng bộ cookie...", "loading");
+    cookieForm.hidden = !cookieForm.hidden;
+});
+
+autoLoginButton.addEventListener("click", async () =>
+{
+    autoLoginButton.disabled = true;
+    cookieForm.hidden = true;
+    loginFlowPanel.hidden = false;
+    loginFlowStatus.textContent = "Đang mở Douyin...";
+    SetStatus("Đang mở phiên đăng nhập Douyin tự động...", "loading");
 
     try
     {
-        const authStatus = await SyncCookiesAsync();
-        SetAuthState(authStatus);
-        SetStatus("Đồng bộ cookie Douyin thành công. Từ lần sau app sẽ dùng lại phiên này.", "success");
+        const flow = await StartLoginFlowAsync();
+        loginFlowId = flow.flowId;
+        RefreshLoginFlowScreenshot();
+        await PollLoginFlowStatus();
+        loginFlowStatusTimer = window.setInterval(PollLoginFlowStatus, LOGIN_FLOW_POLL_MS);
+        loginFlowScreenshotTimer = window.setInterval(RefreshLoginFlowScreenshot, LOGIN_FLOW_SCREENSHOT_MS);
+        SetStatus("Hãy đăng nhập trong khung Douyin. Khi thành công app sẽ tự lấy cookie.", "loading");
     }
     catch (error)
     {
-        SetStatus(error instanceof Error ? error.message : "Đồng bộ cookie thất bại.", "error");
+        loginFlowPanel.hidden = true;
+        SetStatus(error instanceof Error ? error.message : "Không mở được Douyin.", "error");
+    }
+    finally
+    {
+        autoLoginButton.disabled = false;
+    }
+});
+
+cancelLoginFlowButton.addEventListener("click", async () =>
+{
+    const flowId = loginFlowId;
+    StopLoginFlowPolling();
+    loginFlowId = "";
+    loginFlowPanel.hidden = true;
+    loginFlowScreenshot.removeAttribute("src");
+
+    if (flowId)
+    {
+        await StopLoginFlowAsync(flowId).catch(() =>
+        {
+            return null;
+        });
+    }
+
+    SetStatus("Đã đóng phiên đăng nhập Douyin.", "idle");
+});
+
+loginFlowScreenshot.addEventListener("click", async (event) =>
+{
+    if (!loginFlowId || !loginFlowScreenshot.naturalWidth || !loginFlowScreenshot.naturalHeight)
+    {
+        return;
+    }
+
+    const rect = loginFlowScreenshot.getBoundingClientRect();
+    const x = ((event.clientX - rect.left) / rect.width) * loginFlowScreenshot.naturalWidth;
+    const y = ((event.clientY - rect.top) / rect.height) * loginFlowScreenshot.naturalHeight;
+
+    try
+    {
+        await ClickLoginFlowAsync(loginFlowId, x, y);
+        RefreshLoginFlowScreenshot();
+    }
+    catch (error)
+    {
+        SetStatus(error instanceof Error ? error.message : "Không gửi được thao tác click.", "error");
+    }
+});
+
+sendLoginFlowTextButton.addEventListener("click", async () =>
+{
+    const text = String(loginFlowTextInput.value ?? "");
+
+    if (!loginFlowId || !text)
+    {
+        return;
+    }
+
+    try
+    {
+        await TypeLoginFlowTextAsync(loginFlowId, text);
+        loginFlowTextInput.value = "";
+        RefreshLoginFlowScreenshot();
+    }
+    catch (error)
+    {
+        SetStatus(error instanceof Error ? error.message : "Không nhập được nội dung.", "error");
+    }
+});
+
+for (const keyButton of document.querySelectorAll(".login-key-button"))
+{
+    keyButton.addEventListener("click", async () =>
+    {
+        if (!loginFlowId)
+        {
+            return;
+        }
+
+        try
+        {
+            await PressLoginFlowKeyAsync(loginFlowId, keyButton.dataset.key);
+            RefreshLoginFlowScreenshot();
+        }
+        catch (error)
+        {
+            SetStatus(error instanceof Error ? error.message : "Không gửi được phím điều khiển.", "error");
+        }
+    });
+}
+
+cookieForm.addEventListener("submit", async (event) =>
+{
+    event.preventDefault();
+
+    const cookieText = String(cookieTextInput.value ?? "").trim();
+
+    if (!cookieText)
+    {
+        SetStatus("Hãy dán cookie Douyin đã đăng nhập.", "error");
+        return;
+    }
+
+    syncCookiesButton.disabled = true;
+    SetStatus("Đang kiểm tra cookie Douyin...", "loading");
+
+    try
+    {
+        const authStatus = await SyncCookiesAsync(cookieText);
+        cookieTextInput.value = "";
+        SetAuthState(authStatus);
+        SetStatus("Đã lưu phiên Douyin. Có thể tải comment và reply.", "success");
+    }
+    catch (error)
+    {
+        SetAuthState({ isLoggedIn: false, hasUsableCookies: false });
+        SetStatus(error instanceof Error ? error.message : "Sync cookie thất bại.", "error");
     }
     finally
     {
         syncCookiesButton.disabled = false;
+    }
+});
+
+clearSessionButton.addEventListener("click", async () =>
+{
+    clearSessionButton.disabled = true;
+    SetStatus("Đang xóa phiên Douyin...", "loading");
+
+    try
+    {
+        const authStatus = await ClearSessionAsync();
+        StopLoginFlowPolling();
+        loginFlowId = "";
+        SetAuthState(authStatus);
+        cookieForm.hidden = true;
+        loginFlowPanel.hidden = true;
+        loginFlowScreenshot.removeAttribute("src");
+        commentList.className = "comment-list empty";
+        commentList.textContent = "Sync cookie Douyin để bắt đầu.";
+        resultTitle.textContent = "Chưa có dữ liệu";
+        resultMeta.innerHTML = "";
+        SetStatus("Đã xóa phiên Douyin.", "success");
+    }
+    catch (error)
+    {
+        SetStatus(error instanceof Error ? error.message : "Không xóa được phiên.", "error");
+    }
+    finally
+    {
+        clearSessionButton.disabled = false;
     }
 });
 
@@ -431,12 +736,17 @@ commentList.addEventListener("click", async (event) =>
 
         if (responseJson.replyStatus?.requiresLogin)
         {
-            throw new Error("Hãy sync cookies Douyin đã đăng nhập trước khi tải phản hồi.");
+            throw new Error("Hãy sync cookie Douyin đã đăng nhập trước khi tải phản hồi.");
+        }
+
+        if (responseJson.replyStatus?.blockedByVerification && !responseJson.replies.length)
+        {
+            throw new Error(responseJson.replyStatus.error || "Douyin chặn request phản hồi.");
         }
 
         if (!responseJson.replies.length)
         {
-            replySlot.innerHTML = "<div class=\"reply-empty\">Không tải được phản hồi hoặc comment không có phản hồi công khai.</div>";
+            replySlot.innerHTML = "<div class=\"reply-empty\">Không có phản hồi công khai.</div>";
         }
         else
         {
@@ -469,17 +779,22 @@ commentForm.addEventListener("submit", async (event) =>
 {
     event.preventDefault();
 
+    if (!hasDouyinAuth)
+    {
+        SetStatus("Cần sync cookie Douyin đã đăng nhập trước.", "error");
+        return;
+    }
+
     const formData = new FormData(commentForm);
     currentVideoUrl = String(formData.get("videoUrl") ?? "").trim();
     currentTranslationMode = String(formData.get("translationMode") ?? "offline").trim();
-    currentCommentSource = String(formData.get("commentSource") ?? "douyin").trim().toLowerCase() || "douyin";
-    currentLimit = Number(formData.get("commentLimit")) || 0;
+    currentLimit = Number(formData.get("commentLimit")) || DEFAULT_COMMENT_LIMIT;
+    currentCursor = 0;
     currentReplyLimit = 50;
     displayedCount = 0;
 
     submitButton.disabled = true;
-    const sourceLabel = currentCommentSource === "justoneapi" ? "Just One API" : "Douyin";
-    SetStatus(`Đang tải comment từ ${sourceLabel}...`, "loading");
+    SetStatus("Đang tải comment từ Douyin...", "loading");
 
     try
     {
@@ -487,6 +802,7 @@ commentForm.addEventListener("submit", async (event) =>
             currentVideoUrl,
             currentTranslationMode,
             currentLimit,
+            0,
             0,
         );
 
@@ -509,7 +825,7 @@ commentForm.addEventListener("submit", async (event) =>
     }
     finally
     {
-        submitButton.disabled = false;
+        submitButton.disabled = !hasDouyinAuth;
     }
 });
 
@@ -520,5 +836,6 @@ try
 }
 catch
 {
+    SetAuthState({ isLoggedIn: false, hasUsableCookies: false });
     authStatusText.textContent = "Không đọc được trạng thái cookie Douyin.";
 }

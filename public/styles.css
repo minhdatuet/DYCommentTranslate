@@ -153,6 +153,97 @@ body
     gap: 14px;
 }
 
+.auth-actions
+{
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+    gap: 10px;
+}
+
+.auth-actions[hidden]
+{
+    display: none;
+}
+
+.cookie-form
+{
+    display: grid;
+    gap: 12px;
+    padding: 16px;
+    border: 1px solid rgba(254, 44, 85, 0.26);
+    border-radius: 8px;
+    background: rgba(254, 44, 85, 0.08);
+}
+
+.cookie-form[hidden]
+{
+    display: none;
+}
+
+.privacy-note
+{
+    margin: 0;
+    color: var(--muted-light);
+    font-size: 0.86rem;
+    line-height: 1.5;
+}
+
+.login-flow-panel
+{
+    display: grid;
+    gap: 12px;
+    padding: 16px;
+    border: 1px solid rgba(37, 244, 238, 0.24);
+    border-radius: 8px;
+    background: rgba(37, 244, 238, 0.07);
+}
+
+.login-flow-panel[hidden]
+{
+    display: none;
+}
+
+.login-flow-head
+{
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) 92px;
+    gap: 10px;
+    align-items: center;
+}
+
+.login-flow-status
+{
+    margin: 0;
+    color: var(--text-light);
+    line-height: 1.45;
+    font-weight: 650;
+}
+
+.remote-browser
+{
+    overflow: hidden;
+    border: 1px solid var(--line-dark);
+    border-radius: 8px;
+    background: #0f1013;
+}
+
+.remote-browser img
+{
+    display: block;
+    width: 100%;
+    min-height: 320px;
+    object-fit: contain;
+    cursor: crosshair;
+    background: #0f1013;
+}
+
+.remote-controls
+{
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) 82px 72px 72px;
+    gap: 8px;
+}
+
 .field-block
 {
     display: grid;
@@ -164,6 +255,7 @@ body
 
 input,
 select,
+textarea,
 button
 {
     width: 100%;
@@ -175,13 +267,22 @@ button
 }
 
 input,
-select
+select,
+textarea
 {
     color: var(--text-light);
     background: #0f1013;
 }
 
-input::placeholder
+textarea
+{
+    min-height: 132px;
+    resize: vertical;
+    line-height: 1.5;
+}
+
+input::placeholder,
+textarea::placeholder
 {
     color: rgba(255, 255, 255, 0.34);
 }
@@ -204,6 +305,14 @@ button:disabled
 {
     opacity: 0.62;
     cursor: progress;
+}
+
+input:disabled,
+select:disabled,
+textarea:disabled
+{
+    opacity: 0.58;
+    cursor: not-allowed;
 }
 
 .secondary-button
@@ -517,6 +626,12 @@ button:disabled
     {
         max-width: none;
         justify-content: flex-start;
+    }
+
+    .auth-actions,
+    .remote-controls
+    {
+        grid-template-columns: 1fr;
     }
 }
 

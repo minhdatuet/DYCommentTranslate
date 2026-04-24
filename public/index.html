@@ -21,13 +21,58 @@
         <section class="tool-panel">
             <div class="auth-row">
                 <div class="auth-summary">
-                    <p class="auth-label">Phiên Douyin</p>
+                    <p class="auth-label">Phiên người dùng</p>
                     <p id="authStatusText" class="auth-value">Đang kiểm tra cookie...</p>
                 </div>
-                <button id="syncCookiesButton" type="button" class="secondary-button">
-                    Sync cookies Douyin
+                <button id="clearSessionButton" type="button" class="secondary-button" hidden>
+                    Xóa phiên
                 </button>
             </div>
+
+            <div id="authActions" class="auth-actions">
+                <button id="autoLoginButton" type="button">Lấy cookie tự động</button>
+                <button id="manualCookieButton" type="button" class="secondary-button">Dán cookie thủ công</button>
+            </div>
+
+            <section id="loginFlowPanel" class="login-flow-panel" hidden>
+                <div class="login-flow-head">
+                    <p id="loginFlowStatus" class="login-flow-status">Đang mở Douyin...</p>
+                    <button id="cancelLoginFlowButton" type="button" class="secondary-button">Đóng</button>
+                </div>
+
+                <div class="remote-browser">
+                    <img id="loginFlowScreenshot" alt="Phiên đăng nhập Douyin" />
+                </div>
+
+                <div class="remote-controls">
+                    <input
+                        id="loginFlowTextInput"
+                        type="text"
+                        autocomplete="off"
+                        placeholder="Nhập số điện thoại, mã SMS hoặc nội dung cần gửi"
+                    />
+                    <button id="sendLoginFlowTextButton" type="button">Gửi chữ</button>
+                    <button type="button" class="secondary-button login-key-button" data-key="Enter">Enter</button>
+                    <button type="button" class="secondary-button login-key-button" data-key="Backspace">Xóa</button>
+                </div>
+            </section>
+
+            <form id="cookieForm" class="cookie-form" hidden>
+                <label class="field-block" for="cookieText">
+                    <span>Cookie Douyin</span>
+                    <textarea
+                        id="cookieText"
+                        name="cookieText"
+                        autocomplete="off"
+                        spellcheck="false"
+                        placeholder="sessionid=...; sid_guard=...; passport_auth_status=..."
+                    ></textarea>
+                </label>
+                <button id="syncCookiesButton" type="submit">Lưu phiên Douyin</button>
+                <p class="privacy-note">
+                    Cookie chỉ dùng trong phiên hiện tại để gọi Douyin thay mặt trình duyệt của bạn.
+                </p>
+            </form>
 
             <form id="commentForm" class="tool-form">
                 <label class="field-block" for="videoUrl">
@@ -51,22 +96,15 @@
                     </select>
                 </label>
 
-                <label class="field-block" for="commentSource">
-                    <span>Nguồn comment</span>
-                    <select id="commentSource" name="commentSource">
-                        <option value="douyin" selected>Douyin</option>
-                        <option value="justoneapi">Just One API</option>
-                    </select>
-                </label>
-
                 <label class="field-block" for="commentLimit">
-                    <span>Số lượng</span>
+                    <span>Mỗi lần tải</span>
                     <input
                         id="commentLimit"
                         name="commentLimit"
                         type="number"
-                        min="0"
-                        placeholder="Trống = tải hết"
+                        min="1"
+                        max="100"
+                        value="20"
                     />
                 </label>
 
@@ -86,7 +124,7 @@
             </div>
 
             <div id="commentList" class="comment-list empty">
-                Chưa tải comment.
+                Sync cookie Douyin để bắt đầu.
             </div>
         </section>
     </main>

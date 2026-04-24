@@ -1,102 +1,71 @@
-# Deploy production để user xem được reply Douyin
+# Deploy production với cookie của từng user
 
-## Mô hình khuyến nghị
+## Mô hình hiện tại
 
-Không để user cuối tự đăng nhập Douyin. Backend nên dùng một phiên Douyin riêng của server:
+Production không dùng tài khoản Douyin chung của server và không dùng API trung gian. Mỗi user tự sync cookie
+Douyin đã đăng nhập, backend giữ cookie trong phiên HTTP-only ngắn hạn, sau đó mọi request comment/reply đều gọi
+trực tiếp Douyin bằng cookie của user đó.
 
-1. Admin đăng nhập Douyin bằng Chromium ở máy vận hành.
-2. Backend lưu cookie/session vào `.cache`.
-3. Admin capture một request reply thật để lấy `replyApiTemplateUrl`.
-4. Khi user bấm "Xem phản hồi", backend dùng session/template đó để lấy reply.
+Luồng chuẩn:
 
-Lý do: cookie Douyin là dữ liệu nhạy cảm. Nếu để từng user sync cookie thì app phải xử lý
-cookie cá nhân của user, rủi ro bảo mật và khó vận hành hơn.
+1. User bấm "Lấy cookie tự động".
+2. Backend mở một phiên Douyin tạm bằng Playwright và UI hiển thị ảnh của phiên đó.
+3. User đăng nhập trong khung Douyin; trên điện thoại có thể bấm vào ảnh để focus, nhập SMS bằng ô điều khiển,
+   hoặc dùng QR nếu có thiết bị thứ hai.
+4. Backend poll cookie của phiên Playwright cho đến khi đủ trạng thái đăng nhập.
+5. Backend tạo `dyc_user_session` HTTP-only và giữ cookie Douyin trong memory theo phiên.
+6. `/api/comments` và `/api/comment-replies` chỉ chạy khi phiên user hợp lệ.
+7. User bấm "Xóa phiên" để hủy cookie khỏi memory server.
 
-## Cách chuẩn bị session
+## Lý do chọn mô hình này
 
-Chạy ở máy có GUI:
-
-```powershell
-npm run hold:douyin-login
-npm run capture:douyin-replies
-npm run export:douyin-production-session
-```
-
-Sau đó có 2 cách deploy.
-
-## Cách 1: Mount volume `.cache`
-
-Phù hợp nếu deploy Docker trên cùng server hoặc có thể copy volume an toàn.
-
-```yaml
-volumes:
-    - ./.cache:/app/.cache
-```
-
-Repo đã có cấu hình này trong `docker-compose.yml`. Cần đảm bảo `.cache` trên server có:
-
-- `douyin-storage-state.json`
-- `douyin-auth-profile`
-- `douyin-direct-api-state.json`
-
-## Cách 2: Dùng secret/env
-
-Script export tạo file:
-
-```text
-.cache/douyin-production-session.env
-```
-
-File này chứa:
-
-- `DOUYIN_STORAGE_STATE_BASE64`
-- `DOUYIN_REPLY_API_TEMPLATE_URL`
-- `DOUYIN_COMMENT_API_TEMPLATE_URL`
-- `DOUYIN_ADMIN_TOKEN`
-
-Có thể copy các biến này vào secret manager hoặc `.env` trên server. Khi app start, backend
-tự seed lại session từ env.
-
-## Xoay cookie/template khi production đang chạy
-
-Endpoint admin:
-
-```text
-POST /api/douyin/admin/session
-```
-
-Header:
-
-```text
-x-admin-token: <DOUYIN_ADMIN_TOKEN>
-```
-
-Body mẫu:
-
-```json
-{
-    "storageStateBase64": "<base64 JSON storageState>",
-    "replyApiTemplateUrl": "https://www.douyin.com/aweme/v1/web/comment/list/reply/?..."
-}
-```
-
-Hoặc chỉ cập nhật cookie header:
-
-```json
-{
-    "cookieHeader": "name=value; name2=value2",
-    "replyApiTemplateUrl": "https://www.douyin.com/aweme/v1/web/comment/list/reply/?..."
-}
-```
-
-Trong production, `/api/douyin/sync-cookies` cũng yêu cầu admin token. Không mở browser sync
-công khai cho user cuối.
+- Không phụ thuộc dịch vụ bên thứ ba.
+- Không dùng `.cache` làm nguồn production.
+- Không dùng cookie/tài khoản Douyin chung của server.
+- User kiểm soát phiên Douyin của chính họ.
+- Không cần đọc cookie từ trình duyệt mobile, vì login xảy ra trong phiên browser tạm của backend.
 
 ## Lưu ý vận hành
 
-- `DOUYIN_REPLY_API_TEMPLATE_URL` phải là URL reply thật từng được browser Douyin tạo ra.
-- Backend sẽ thay `item_id`, `comment_id`, `cursor`, `count` trên template khi gọi reply.
-- Nếu reply bắt đầu bị body rỗng hoặc `x-vc-bdturing-parameters`, chạy lại
-  `npm run hold:douyin-login` và `npm run capture:douyin-replies`, rồi cập nhật secret.
-- Không commit `.cache`, `.env`, hoặc file export production session.
+- Bắt buộc deploy qua HTTPS nếu public internet, vì cookie phiên app phải đi qua kênh mã hóa.
+- Memory session phù hợp single instance. Nếu chạy nhiều instance, cần sticky session hoặc một session store nội bộ.
+- Cookie Douyin là dữ liệu nhạy cảm, không log request body của `/api/douyin/session`.
+- `DOUYIN_REPLY_API_TEMPLATE_URL` và `DOUYIN_COMMENT_API_TEMPLATE_URL` vẫn có thể cấu hình như template hỗ trợ,
+  nhưng auth luôn lấy từ cookie của user.
+- Nếu server chạy headless Chromium, cần môi trường cho phép Playwright mở browser và chụp screenshot.
+- Không log screenshot, thao tác remote browser hoặc request body login.
 
+## Endpoint chính
+
+```text
+POST /api/douyin/session
+DELETE /api/douyin/session
+GET /api/douyin/auth-status
+POST /api/douyin/login-flow
+GET /api/douyin/login-flow/:flowId/status
+GET /api/douyin/login-flow/:flowId/screenshot
+POST /api/douyin/login-flow/:flowId/click
+POST /api/douyin/login-flow/:flowId/type
+POST /api/douyin/login-flow/:flowId/key
+DELETE /api/douyin/login-flow/:flowId
+POST /api/comments
+POST /api/comment-replies
+```
+
+`POST /api/douyin/session` nhận:
+
+```json
+{
+    "cookieHeader": "sessionid=...; sid_guard=...; passport_auth_status=..."
+}
+```
+
+Hoặc storage state:
+
+```json
+{
+    "storageStateBase64": "<base64 JSON storageState>"
+}
+```
+
+Nếu cookie chưa đủ đăng nhập, backend trả `400` và không tạo phiên.
