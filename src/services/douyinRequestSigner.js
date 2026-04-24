@@ -498,7 +498,7 @@ export function BuildSignedReplyListUrl(videoId, commentId, cursor, count, cooki
     const params =
     {
         ...BuildBaseParams(cookies, userAgent),
-        aweme_id: String(videoId),
+        item_id: String(videoId),
         comment_id: String(commentId),
         cursor: String(cursor),
         count: String(count),

@@ -76,6 +76,7 @@ let sharedContextPromise = null;
 let latestCommentApiTemplateUrl = "";
 let latestReplyApiTemplateUrl = "";
 let cookieSyncPromise = null;
+let environmentSessionBootstrapped = false;
 
 // Trích video ID từ các dạng link Douyin:
 // - douyin.com/video/<id>
@@ -237,6 +238,80 @@ function WriteAuthState(authState)
         JSON.stringify(authState, null, 2),
         "utf8",
     );
+}
+
+function ReadEnvironmentStorageState()
+{
+    const rawStorageState = String(config.douyinStorageStateBase64 ?? "").trim();
+
+    if (!rawStorageState)
+    {
+        return null;
+    }
+
+    try
+    {
+        const decodedState = Buffer.from(rawStorageState, "base64").toString("utf8");
+        const storageState = JSON.parse(decodedState);
+        const cookies = Array.isArray(storageState?.cookies) ? storageState.cookies : null;
+
+        if (!cookies)
+        {
+            return null;
+        }
+
+        return {
+            cookies,
+            origins: Array.isArray(storageState?.origins) ? storageState.origins : [],
+        };
+    }
+    catch
+    {
+        return null;
+    }
+}
+
+function BootstrapEnvironmentSession()
+{
+    if (environmentSessionBootstrapped)
+    {
+        return;
+    }
+
+    environmentSessionBootstrapped = true;
+    const storageState = ReadEnvironmentStorageState();
+
+    if (storageState)
+    {
+        WriteAuthState(storageState);
+    }
+    else if (config.douyinCookieHeader)
+    {
+        const parsedCookies = ParseCookieRows(config.douyinCookieHeader);
+
+        if (parsedCookies.length > 0)
+        {
+            WriteAuthState(
+                {
+                    cookies: parsedCookies,
+                    origins: [],
+                },
+            );
+        }
+    }
+
+    if (config.douyinCommentApiTemplateUrl || config.douyinReplyApiTemplateUrl)
+    {
+        if (config.douyinCommentApiTemplateUrl)
+        {
+            SaveCommentApiTemplateUrl(config.douyinCommentApiTemplateUrl);
+        }
+
+        if (config.douyinReplyApiTemplateUrl)
+        {
+            SaveReplyApiTemplateUrl(config.douyinReplyApiTemplateUrl);
+        }
+    }
 }
 
 function ReadDirectApiState()
@@ -798,16 +873,22 @@ async function CloseSharedPlaywrightAsync()
 
 function WithTimeoutAsync(promise, timeoutMs, errorMessage)
 {
+    let timeoutId;
+    const timeoutPromise = new Promise((_, reject) =>
+    {
+        timeoutId = setTimeout(() =>
+        {
+            reject(new Error(errorMessage));
+        }, timeoutMs);
+    });
+
     return Promise.race([
         promise,
-        new Promise((_, reject) =>
-        {
-            setTimeout(() =>
-            {
-                reject(new Error(errorMessage));
-            }, timeoutMs);
-        }),
-    ]);
+        timeoutPromise,
+    ]).finally(() =>
+    {
+        clearTimeout(timeoutId);
+    });
 }
 
 async function GetSharedBrowserAsync()
@@ -1419,7 +1500,8 @@ async function FetchRepliesViaNodeApiAsync(cookieHeader, videoId, commentId, max
             controller.abort();
         }, INTERNAL_COMMENT_REQUEST_TIMEOUT_MS);
 
-        requestUrl.searchParams.set("aweme_id", videoId);
+        requestUrl.searchParams.delete("aweme_id");
+        requestUrl.searchParams.set("item_id", videoId);
         requestUrl.searchParams.set("comment_id", commentId);
         requestUrl.searchParams.set("cursor", String(cursor));
         requestUrl.searchParams.set("count", String(COMMENT_PAGE_SIZE));
@@ -1640,6 +1722,7 @@ async function FetchRepliesViaWebpackAsync(page, videoId, commentTargets)
                 const pageResult = await Promise.race([
                     fetchReplyList({
                         awemeId: videoId,
+                        itemId: videoId,
                         commentId: target.commentId,
                         cursor,
                         count: pageSize,
@@ -1719,7 +1802,8 @@ async function FetchRepliesViaCapturedApiAsync(page, videoId, commentId, maxRepl
                 base = new URL(replyPath, "https://www.douyin.com");
             }
 
-            base.searchParams.set("aweme_id", videoId);
+            base.searchParams.delete("aweme_id");
+            base.searchParams.set("item_id", videoId);
             base.searchParams.set("comment_id", commentId);
             base.searchParams.set("cursor", String(cursor));
             base.searchParams.set("count", String(count));
@@ -1939,6 +2023,11 @@ async function WaitForLoginCookiesAsync(context)
 
 export class DouyinService
 {
+    constructor()
+    {
+        BootstrapEnvironmentSession();
+    }
+
     async WarmupAsync()
     {
         const authStatus = GetCachedAuthStatus();
@@ -1998,6 +2087,26 @@ export class DouyinService
             {
                 cookies: parsedCookies,
                 origins: [],
+            },
+        );
+        await CloseSharedPlaywrightAsync();
+
+        return GetCachedAuthStatus();
+    }
+
+    async ImportStorageStateAsync(storageState)
+    {
+        const cookies = Array.isArray(storageState?.cookies) ? storageState.cookies : [];
+
+        if (cookies.length === 0)
+        {
+            throw new Error("Storage state không có cookie Douyin hợp lệ.");
+        }
+
+        WriteAuthState(
+            {
+                cookies,
+                origins: Array.isArray(storageState?.origins) ? storageState.origins : [],
             },
         );
         await CloseSharedPlaywrightAsync();
@@ -2100,6 +2209,48 @@ export class DouyinService
         const cookieHeader = BuildCookieHeaderFromCookies(storedCookies);
         const authStatus = GetCachedAuthStatus();
         let signedApiErrorMessage = "";
+        let directTemplateErrorMessage = "";
+        const configuredReplyTemplateUrl = GetConfiguredReplyApiTemplateUrl();
+
+        if (cookieHeader && configuredReplyTemplateUrl)
+        {
+            try
+            {
+                const directTemplateResult = await WithTimeoutAsync(
+                    FetchRepliesViaNodeApiAsync(
+                        cookieHeader,
+                        videoId,
+                        commentId,
+                        maxReplies,
+                        configuredReplyTemplateUrl,
+                        canonicalVideoUrl,
+                    ),
+                    GET_COMMENTS_TIMEOUT_MS,
+                    "Lấy phản hồi qua Douyin captured reply API bị quá thời gian chờ.",
+                );
+                const normalizedReplies = directTemplateResult.replies.map((reply, index) =>
+                {
+                    return NormalizeReplyComment(reply, index);
+                });
+
+                return {
+                    replies: normalizedReplies,
+                    replyStatus:
+                    {
+                        fetchedReplies: normalizedReplies.length > 0,
+                        requiresLogin: false,
+                        blockedByVerification: false,
+                        fetchedReplyCommentCount: normalizedReplies.length,
+                    },
+                };
+            }
+            catch (error)
+            {
+                directTemplateErrorMessage = error instanceof Error
+                    ? error.message
+                    : "Douyin captured reply API thất bại.";
+            }
+        }
 
         if (cookieHeader)
         {
@@ -2216,7 +2367,6 @@ export class DouyinService
 
                 // Fallback: luôn thử in-browser fetch (credentials:include),
                 // FetchRepliesViaCapturedApiAsync tự build URL nếu không có URL thực
-                const configuredReplyTemplateUrl = GetConfiguredReplyApiTemplateUrl();
                 const derivedReplyTemplateUrl = DeriveReplyApiTemplateUrlFromCommentTemplateUrl(
                     GetConfiguredCommentApiTemplateUrl(),
                 );
@@ -2272,9 +2422,10 @@ export class DouyinService
                             const apiMsg = apiError instanceof Error ? apiError.message : "Không rõ lý do.";
                             const nodeMsg = nodeError instanceof Error ? nodeError.message : "Không rõ lý do.";
                             const signedMsg = signedApiErrorMessage ? ` | signed API (${signedApiErrorMessage})` : "";
+                            const directMsg = directTemplateErrorMessage ? ` | captured template (${directTemplateErrorMessage})` : "";
 
                             throw new Error(
-                                `Lấy phản hồi thất bại: webpack (${webpackMsg}) | in-browser API (${apiMsg}) | node API (${nodeMsg})${signedMsg}.`,
+                                `Lấy phản hồi thất bại: webpack (${webpackMsg}) | in-browser API (${apiMsg}) | node API (${nodeMsg})${signedMsg}${directMsg}.`,
                             );
                         }
                     }
@@ -2282,8 +2433,9 @@ export class DouyinService
                     const webpackMsg = webpackError instanceof Error ? webpackError.message : "Không rõ lý do.";
                     const apiMsg = apiError instanceof Error ? apiError.message : "Không rõ lý do.";
                     const signedMsg = signedApiErrorMessage ? ` | signed API (${signedApiErrorMessage})` : "";
+                    const directMsg = directTemplateErrorMessage ? ` | captured template (${directTemplateErrorMessage})` : "";
 
-                    throw new Error(`Lấy phản hồi thất bại: webpack (${webpackMsg}) | in-browser API (${apiMsg})${signedMsg}.`);
+                    throw new Error(`Lấy phản hồi thất bại: webpack (${webpackMsg}) | in-browser API (${apiMsg})${signedMsg}${directMsg}.`);
                 }
             }
 

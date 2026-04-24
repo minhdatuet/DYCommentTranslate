@@ -1,0 +1,28 @@
+[
+    {
+        "name": "video-7623466763384016163-comment-11-replies",
+        "checkedAt": "2026-04-24",
+        "videoId": "7623466763384016163",
+        "videoUrl": "https://www.douyin.com/jingxuan?modal_id=7623466763384016163",
+        "canonicalVideoUrl": "https://www.douyin.com/video/7623466763384016163",
+        "commentId": "7623661061283463972",
+        "commentText": "这种蜂蜜🍯2 30 起步",
+        "nickname": "悟愛",
+        "ipLocation": "湖南",
+        "likeCount": 4,
+        "observedReplyCount": 11,
+        "purpose": "Dùng để kiểm thử endpoint lấy reply thật của Douyin.",
+        "replyEndpoint": "https://www.douyin.com/aweme/v1/web/comment/list/reply/",
+        "requiredReplyParams": {
+            "item_id": "7623466763384016163",
+            "comment_id": "7623661061283463972",
+            "cursor": "0",
+            "count": "20"
+        },
+        "notes": [
+            "Comment cấp 1 lấy được bằng douyin-signed-api khi chưa đăng nhập.",
+            "Cookie guest hiện tại chưa lấy được reply thật, endpoint reply trả body rỗng hoặc bị challenge.",
+            "Endpoint reply phải dùng item_id cho video ID, không dùng aweme_id."
+        ]
+    }
+]

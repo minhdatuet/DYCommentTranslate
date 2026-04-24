@@ -13,9 +13,13 @@ const DEFAULT_JUSTONEAPI_BASE_URL = "https://api.justoneapi.com";
 
 export const config =
 {
+    nodeEnv: String(process.env.NODE_ENV ?? "development").trim().toLowerCase(),
     port: Number(process.env.PORT ?? 3000),
     douyinCommentApiTemplateUrl: String(process.env.DOUYIN_COMMENT_API_TEMPLATE_URL ?? "").trim(),
     douyinReplyApiTemplateUrl: String(process.env.DOUYIN_REPLY_API_TEMPLATE_URL ?? "").trim(),
+    douyinCookieHeader: String(process.env.DOUYIN_COOKIE_HEADER ?? "").trim(),
+    douyinStorageStateBase64: String(process.env.DOUYIN_STORAGE_STATE_BASE64 ?? "").trim(),
+    douyinAdminToken: String(process.env.DOUYIN_ADMIN_TOKEN ?? "").trim(),
     douyinDirectApiStatePath: path.resolve(".cache", "douyin-direct-api-state.json"),
     justOneApiBaseUrl: String(process.env.JUSTONEAPI_BASE_URL ?? DEFAULT_JUSTONEAPI_BASE_URL).trim(),
     justOneApiToken: String(process.env.JUSTONEAPI_TOKEN ?? "").trim(),

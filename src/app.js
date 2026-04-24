@@ -21,6 +21,43 @@ const translationService = new TranslationService(offlineTranslator, geminiTrans
 // Cache comment đã crawl theo videoId, tránh mở browser lại khi "Tải thêm"
 const commentCache = new Map();
 
+function IsAdminRequest(request)
+{
+    if (!config.douyinAdminToken)
+    {
+        return config.nodeEnv !== "production";
+    }
+
+    const headerToken = String(request.get("x-admin-token") ?? "").trim();
+    const authorization = String(request.get("authorization") ?? "").trim();
+    const bearerToken = authorization.toLowerCase().startsWith("bearer ")
+        ? authorization.slice("bearer ".length).trim()
+        : "";
+
+    return headerToken === config.douyinAdminToken || bearerToken === config.douyinAdminToken;
+}
+
+function RejectAdminRequest(response)
+{
+    response.status(403).json(
+    {
+        ok: false,
+        error: "Endpoint quản trị Douyin cần DOUYIN_ADMIN_TOKEN.",
+    });
+}
+
+function DecodeStorageStateBase64(storageStateBase64)
+{
+    const normalized = String(storageStateBase64 ?? "").trim();
+
+    if (!normalized)
+    {
+        return null;
+    }
+
+    return JSON.parse(Buffer.from(normalized, "base64").toString("utf8"));
+}
+
 offlineTranslator.EnsureLoaded();
 void douyinService.WarmupAsync().catch((error) =>
 {
@@ -29,7 +66,7 @@ void douyinService.WarmupAsync().catch((error) =>
 
 app.use(express.json(
 {
-    limit: "1mb",
+    limit: "3mb",
 }));
 app.use(express.static(config.publicDir));
 
@@ -45,6 +82,7 @@ app.get("/api/health", (request, response) =>
         offlineDictDir: config.offlineDictDir,
         justOneApiConfigured: justOneApiService.IsConfigured,
         defaultCommentSource: config.commentSource,
+        douyinAdminConfigured: Boolean(config.douyinAdminToken),
         douyinAuthStatus,
     });
 });
@@ -60,6 +98,12 @@ app.get("/api/douyin/auth-status", (request, response) =>
 
 app.post("/api/douyin/sync-cookies", async (request, response) =>
 {
+    if (!IsAdminRequest(request))
+    {
+        RejectAdminRequest(response);
+        return;
+    }
+
     try
     {
         const authStatus = await douyinService.SyncCookiesAsync();
@@ -77,6 +121,64 @@ app.post("/api/douyin/sync-cookies", async (request, response) =>
         {
             ok: false,
             error: error instanceof Error ? error.message : "Đồng bộ cookie thất bại.",
+        });
+    }
+});
+
+app.post("/api/douyin/admin/session", async (request, response) =>
+{
+    if (!IsAdminRequest(request))
+    {
+        RejectAdminRequest(response);
+        return;
+    }
+
+    try
+    {
+        const storageState = request.body?.storageState
+            ?? DecodeStorageStateBase64(request.body?.storageStateBase64);
+        const cookieText = String(
+            request.body?.cookieHeader
+            ?? request.body?.cookieText
+            ?? "",
+        ).trim();
+        const commentApiTemplateUrl = String(request.body?.commentApiTemplateUrl ?? "").trim();
+        const replyApiTemplateUrl = String(request.body?.replyApiTemplateUrl ?? "").trim();
+        let authStatus = douyinService.GetAuthStatus();
+
+        if (storageState)
+        {
+            authStatus = await douyinService.ImportStorageStateAsync(storageState);
+        }
+        else if (cookieText)
+        {
+            authStatus = await douyinService.ImportCookiesAsync(cookieText);
+        }
+
+        if (commentApiTemplateUrl || replyApiTemplateUrl)
+        {
+            authStatus = douyinService.ConfigureDirectApi(
+                {
+                    commentApiTemplateUrl,
+                    replyApiTemplateUrl,
+                },
+            );
+        }
+
+        commentCache.clear();
+
+        response.json(
+        {
+            ok: true,
+            ...authStatus,
+        });
+    }
+    catch (error)
+    {
+        response.status(400).json(
+        {
+            ok: false,
+            error: error instanceof Error ? error.message : "Cập nhật phiên Douyin thất bại.",
         });
     }
 });
