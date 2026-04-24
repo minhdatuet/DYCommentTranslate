@@ -1,10 +1,7 @@
 import fs from "node:fs";
 import path from "node:path";
 
-const chromium = {
-    launch: async () => { throw new Error("Playwright has been removed"); },
-    launchPersistentContext: async () => { throw new Error("Playwright has been removed"); }
-};
+import { chromium } from "playwright";
 
 import { config } from "../config.js";
 import { BuildSignedCommentListUrl, BuildSignedReplyListUrl, GenerateVerifyFp } from "./douyinRequestSigner.js";

@@ -8,14 +8,11 @@
         "dev": "node --watch src/app.js",
         "start": "node src/app.js",
         "test:douyin": "node scripts/test-douyin.js",
-        "capture:douyin-replies": "node scripts/capture-douyin-reply-network.js",
-        "export:douyin-production-session": "node scripts/export-douyin-production-session.js",
-        "hold:douyin-login": "node scripts/hold-douyin-login.js",
         "sync:douyin-cookies": "node scripts/sync-douyin-cookies.js"
     },
     "dependencies": {
+        "cors": "^2.8.6",
         "dotenv": "^16.6.1",
-        "express": "^5.1.0",
-        "playwright": "^1.59.1"
+        "express": "^5.1.0"
     }
 }

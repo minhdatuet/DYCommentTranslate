@@ -30,32 +30,21 @@
             </div>
 
             <div id="authActions" class="auth-actions">
-                <button id="autoLoginButton" type="button">Lấy cookie tự động</button>
-                <button id="manualCookieButton" type="button" class="secondary-button">Dán cookie thủ công</button>
+                <button id="manualCookieButton" type="button">Nhập cookie thủ công</button>
             </div>
 
-            <section id="loginFlowPanel" class="login-flow-panel" hidden>
-                <div class="login-flow-head">
-                    <p id="loginFlowStatus" class="login-flow-status">Đang mở Douyin...</p>
-                    <button id="cancelLoginFlowButton" type="button" class="secondary-button">Đóng</button>
-                </div>
-
-                <div class="remote-browser">
-                    <img id="loginFlowScreenshot" alt="Phiên đăng nhập Douyin" />
-                </div>
-
-                <div class="remote-controls">
-                    <input
-                        id="loginFlowTextInput"
-                        type="text"
-                        autocomplete="off"
-                        placeholder="Nhập số điện thoại, mã SMS hoặc nội dung cần gửi"
-                    />
-                    <button id="sendLoginFlowTextButton" type="button">Gửi chữ</button>
-                    <button type="button" class="secondary-button login-key-button" data-key="Enter">Enter</button>
-                    <button type="button" class="secondary-button login-key-button" data-key="Backspace">Xóa</button>
-                </div>
-            </section>
+            <div class="manual-instruction" id="manualInstruction" hidden>
+                <h4>Cách lấy Cookie trên điện thoại Android:</h4>
+                <ol>
+                    <li>Cài đặt ứng dụng <strong>Kiwi Browser</strong> từ CH Play.</li>
+                    <li>Mở Kiwi Browser, truy cập <code>https://www.douyin.com</code> và đăng nhập.</li>
+                    <li>Bấm vào menu 3 chấm của Kiwi Browser > Chọn <strong>Developer tools (Công cụ dành cho nhà phát triển)</strong>. Trình duyệt sẽ mở một tab DevTools mới.</li>
+                    <li>Trong tab DevTools, chọn mục <strong>Network (Mạng)</strong>.</li>
+                    <li>Quay lại tab Douyin tải lại trang (Refresh). Sau đó quay lại tab DevTools, bấm vào một request bất kỳ vừa hiện ra (ví dụ các request có tên là số hoặc chữ).</li>
+                    <li>Kéo xuống phần <strong>Request Headers</strong>, tìm mục <code>cookie: ...</code>, copy toàn bộ giá trị dài loằng ngoằng của nó.</li>
+                    <li>Dán đoạn copy đó vào ô bên dưới.</li>
+                </ol>
+            </div>
 
             <form id="cookieForm" class="cookie-form" hidden>
                 <label class="field-block" for="cookieText">
