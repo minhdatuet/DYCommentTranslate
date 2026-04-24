@@ -9,6 +9,7 @@ const DEFAULT_DICT_DIR = process.platform === "win32"
     ? "D:\\Novel\\convert-etx"
     : "./dict";
 const DEFAULT_STV_API_URL = "https://comic.sangtacvietcdn.xyz/tsm.php?cdn=";
+const DEFAULT_JUSTONEAPI_BASE_URL = "https://api.justoneapi.com";
 
 export const config =
 {
@@ -16,6 +17,10 @@ export const config =
     douyinCommentApiTemplateUrl: String(process.env.DOUYIN_COMMENT_API_TEMPLATE_URL ?? "").trim(),
     douyinReplyApiTemplateUrl: String(process.env.DOUYIN_REPLY_API_TEMPLATE_URL ?? "").trim(),
     douyinDirectApiStatePath: path.resolve(".cache", "douyin-direct-api-state.json"),
+    justOneApiBaseUrl: String(process.env.JUSTONEAPI_BASE_URL ?? DEFAULT_JUSTONEAPI_BASE_URL).trim(),
+    justOneApiToken: String(process.env.JUSTONEAPI_TOKEN ?? "").trim(),
+    justOneApiTimeoutMs: Number(process.env.JUSTONEAPI_TIMEOUT_MS ?? 90000),
+    commentSource: String(process.env.COMMENT_SOURCE ?? "douyin").trim().toLowerCase(),
     geminiApiKey: process.env.GEMINI_API_KEY ?? "",
     geminiModel: process.env.GEMINI_MODEL ?? "gemini-2.5-flash",
     stvApiUrl: process.env.STV_API_URL ?? DEFAULT_STV_API_URL,

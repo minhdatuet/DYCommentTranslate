@@ -3,6 +3,7 @@ import express from "express";
 import { config } from "./config.js";
 import { DouyinService } from "./services/douyinService.js";
 import { GeminiTranslator } from "./services/geminiTranslator.js";
+import { JustOneApiDouyinService } from "./services/justOneApiDouyinService.js";
 import { OfflineTranslator } from "./services/offlineTranslator.js";
 import { StvTranslator } from "./services/stvTranslator.js";
 import { TranslationService } from "./services/translationService.js";
@@ -11,6 +12,7 @@ const CACHE_TTL_MS = 10 * 60 * 1000; // 10 phút
 
 const app = express();
 const douyinService = new DouyinService();
+const justOneApiService = new JustOneApiDouyinService();
 const offlineTranslator = new OfflineTranslator(config.offlineDictDir);
 const geminiTranslator = new GeminiTranslator();
 const stvTranslator = new StvTranslator();
@@ -41,6 +43,8 @@ app.get("/api/health", (request, response) =>
         geminiConfigured: geminiTranslator.IsConfigured,
         stvConfigured: stvTranslator.IsConfigured,
         offlineDictDir: config.offlineDictDir,
+        justOneApiConfigured: justOneApiService.IsConfigured,
+        defaultCommentSource: config.commentSource,
         douyinAuthStatus,
     });
 });
@@ -81,8 +85,10 @@ app.post("/api/comments", async (request, response) =>
 {
     const videoUrl = String(request.body?.videoUrl ?? "").trim();
     const translationMode = String(request.body?.translationMode ?? "offline").trim().toLowerCase();
+    const requestedSource = String(request.body?.source ?? "").trim().toLowerCase();
     const limit = Number(request.body?.limit) || 0; // 0 = tải hết
     const offset = Number(request.body?.offset) || 0;
+    const commentSource = requestedSource || config.commentSource || "douyin";
 
     if (!videoUrl)
     {
@@ -102,7 +108,7 @@ app.post("/api/comments", async (request, response) =>
         // Tìm cache theo videoUrl
         for (const [, entry] of commentCache)
         {
-            if (entry.videoUrl === videoUrl)
+            if (entry.videoUrl === videoUrl && entry.commentSource === commentSource)
             {
                 cached = entry;
                 break;
@@ -142,7 +148,15 @@ app.post("/api/comments", async (request, response) =>
 
         // Cần crawl từ Douyin (lần đầu hoặc tải thêm)
         const startCursor = cached?.nextCursor ?? 0;
-        result = await douyinService.GetCommentsAsync(videoUrl, limit, startCursor);
+
+        if (commentSource === "justoneapi")
+        {
+            result = await justOneApiService.GetCommentsAsync(videoUrl, limit, startCursor);
+        }
+        else
+        {
+            result = await douyinService.GetCommentsAsync(videoUrl, limit, startCursor);
+        }
 
         // Trim kết quả đúng limit (để không trả thừa do page size Douyin)
         const trimmedComments = limit > 0
@@ -157,6 +171,7 @@ app.post("/api/comments", async (request, response) =>
         {
             videoUrl,
             videoId: result.videoId,
+            commentSource,
             comments: allCrawled,
             reportedCommentCount: result.reportedCommentCount,
             replyStatus: cached?.replyStatus ?? result.replyStatus,
@@ -165,7 +180,7 @@ app.post("/api/comments", async (request, response) =>
             createdAt: cached?.createdAt ?? Date.now(),
         };
 
-        commentCache.set(result.videoId, cacheEntry);
+        commentCache.set(`${commentSource}:${result.videoId}`, cacheEntry);
 
         // Dọn cache cũ
         for (const [key, entry] of commentCache)
@@ -212,7 +227,9 @@ app.post("/api/comment-replies", async (request, response) =>
     const videoUrl = String(request.body?.videoUrl ?? "").trim();
     const commentId = String(request.body?.commentId ?? "").trim();
     const translationMode = String(request.body?.translationMode ?? "offline").trim().toLowerCase();
+    const requestedSource = String(request.body?.source ?? "").trim().toLowerCase();
     const limit = Number(request.body?.limit) || 0;
+    const commentSource = requestedSource || config.commentSource || "douyin";
 
     if (!videoUrl || !commentId)
     {
@@ -226,7 +243,9 @@ app.post("/api/comment-replies", async (request, response) =>
 
     try
     {
-        const result = await douyinService.GetRepliesAsync(videoUrl, commentId, limit);
+        const result = commentSource === "justoneapi"
+            ? await justOneApiService.GetRepliesAsync(videoUrl, commentId, limit)
+            : await douyinService.GetRepliesAsync(videoUrl, commentId, limit);
         const translatedReplies = await translationService.TranslateCommentsAsync(
             result.replies,
             translationMode,
@@ -236,6 +255,7 @@ app.post("/api/comment-replies", async (request, response) =>
         {
             ok: true,
             commentId,
+            source: commentSource,
             replyStatus: result.replyStatus,
             replies: translatedReplies,
         });

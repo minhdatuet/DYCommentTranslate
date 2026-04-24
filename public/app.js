@@ -10,6 +10,7 @@ const API_REQUEST_TIMEOUT_MS = 120000;
 
 let currentVideoUrl = "";
 let currentTranslationMode = "";
+let currentCommentSource = "douyin";
 let currentLimit = 0;
 let displayedCount = 0;
 let hasMore = false;
@@ -225,7 +226,7 @@ async function FetchComments(videoUrl, translationMode, limit, offset)
             {
                 "Content-Type": "application/json",
             },
-            body: JSON.stringify({ videoUrl, translationMode, limit, offset }),
+            body: JSON.stringify({ videoUrl, translationMode, limit, offset, source: currentCommentSource }),
             signal: controller.signal,
         });
     }
@@ -268,6 +269,7 @@ async function FetchReplies(videoUrl, commentId, translationMode, limit)
             commentId,
             translationMode,
             limit,
+            source: currentCommentSource,
         }),
     });
     const responseJson = await response.json();
@@ -467,12 +469,14 @@ commentForm.addEventListener("submit", async (event) =>
     const formData = new FormData(commentForm);
     currentVideoUrl = String(formData.get("videoUrl") ?? "").trim();
     currentTranslationMode = String(formData.get("translationMode") ?? "offline").trim();
+    currentCommentSource = String(formData.get("commentSource") ?? "douyin").trim().toLowerCase() || "douyin";
     currentLimit = Number(formData.get("commentLimit")) || 0;
     currentReplyLimit = 50;
     displayedCount = 0;
 
     submitButton.disabled = true;
-    SetStatus("Đang tải comment từ Douyin...", "loading");
+    const sourceLabel = currentCommentSource === "justoneapi" ? "Just One API" : "Douyin";
+    SetStatus(`Đang tải comment từ ${sourceLabel}...`, "loading");
 
     try
     {
