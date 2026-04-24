@@ -9,11 +9,13 @@
 <body>
     <main class="page-shell">
         <section class="hero-panel">
-            <p class="eyebrow">Douyin Comment Translator</p>
-            <h1>Nhập link Douyin, kéo comment tiếng Trung và dịch sang tiếng Việt.</h1>
-            <p class="hero-copy">
-                Hỗ trợ 3 chế độ dịch: SangTacViet API, Gemini API, hoặc từ điển offline.
-            </p>
+            <div class="brand-row">
+                <div class="brand-mark">DY</div>
+                <div>
+                    <p class="eyebrow">Douyin</p>
+                    <h1>Bình luận đã dịch</h1>
+                </div>
+            </div>
         </section>
 
         <section class="tool-panel">
@@ -29,7 +31,7 @@
 
             <form id="commentForm" class="tool-form">
                 <label class="field-block" for="videoUrl">
-                    <span>Link video Douyin</span>
+                    <span>Link video</span>
                     <input
                         id="videoUrl"
                         name="videoUrl"
@@ -41,7 +43,7 @@
                 </label>
 
                 <label class="field-block" for="translationMode">
-                    <span>Chế độ dịch</span>
+                    <span>Dịch bằng</span>
                     <select id="translationMode" name="translationMode">
                         <option value="stv" selected>SangTacViet API</option>
                         <option value="offline">Offline dictionary</option>
@@ -50,10 +52,10 @@
                 </label>
 
                 <label class="field-block" for="commentSource">
-                    <span>Nguồn lấy comment</span>
+                    <span>Nguồn comment</span>
                     <select id="commentSource" name="commentSource">
-                        <option value="douyin" selected>Douyin (Playwright/Webpack)</option>
-                        <option value="justoneapi">Just One API (V1)</option>
+                        <option value="douyin" selected>Douyin</option>
+                        <option value="justoneapi">Just One API</option>
                     </select>
                 </label>
 
@@ -77,7 +79,7 @@
         <section class="result-panel">
             <div class="result-header">
                 <div>
-                    <p class="result-label">Kết quả</p>
+                    <p class="result-label">Bình luận</p>
                     <h2 id="resultTitle">Chưa có dữ liệu</h2>
                 </div>
                 <div id="resultMeta" class="result-meta"></div>

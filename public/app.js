@@ -43,9 +43,7 @@ function SetAuthState(authStatus)
 
     if (hasUsableCookies)
     {
-        authStatusText.textContent = syncedAt
-            ? `Đang dùng guest cookie. Có thể tải comment công khai, nhưng reply vẫn cần đăng nhập.`
-            : "Đang dùng guest cookie. Có thể tải comment công khai, nhưng reply vẫn cần đăng nhập.";
+        authStatusText.textContent = "Đang dùng guest cookie. Có thể tải comment công khai, nhưng reply vẫn cần đăng nhập.";
         syncCookiesButton.hidden = false;
         return;
     }
@@ -63,6 +61,39 @@ function EscapeHtml(text)
         .replaceAll("\"", "&quot;");
 }
 
+function GetTranslatedText(item)
+{
+    return String(item?.translatedText ?? "").trim() || "Chưa có bản dịch.";
+}
+
+function GetAvatarText(nickname)
+{
+    const normalizedNickname = String(nickname ?? "").trim();
+
+    if (!normalizedNickname)
+    {
+        return "?";
+    }
+
+    return [...normalizedNickname][0].toUpperCase();
+}
+
+function RenderReplyItems(replies)
+{
+    return replies.map((reply) =>
+    {
+        return `
+            <div class="reply-card">
+                <div class="avatar avatar-small">${EscapeHtml(GetAvatarText(reply.nickname))}</div>
+                <div class="reply-body">
+                    <p class="reply-meta">${EscapeHtml(reply.nickname)} · ${reply.likeCount} thích</p>
+                    <p class="reply-text">${EscapeHtml(GetTranslatedText(reply))}</p>
+                </div>
+            </div>
+        `;
+    }).join("");
+}
+
 function RenderCommentCards(comments)
 {
     return comments.map((comment) =>
@@ -71,16 +102,7 @@ function RenderCommentCards(comments)
         const repliesHtml = Array.isArray(comment.replies) && comment.replies.length > 0
             ? `
                 <div class="reply-list">
-                    <p class="reply-title">Phản hồi</p>
-                    ${comment.replies.map((reply) =>
-                    {
-                        return `
-                            <div class="reply-card">
-                                <p class="reply-meta">${EscapeHtml(reply.nickname)} · ${reply.likeCount} thích</p>
-                                <p class="reply-text">${EscapeHtml(reply.text)}</p>
-                            </div>
-                        `;
-                    }).join("")}
+                    ${RenderReplyItems(comment.replies)}
                 </div>
             `
             : "";
@@ -101,27 +123,19 @@ function RenderCommentCards(comments)
 
         return `
             <article class="comment-card" data-comment-id="${EscapeHtml(comment.commentId)}">
-                <div class="comment-head">
-                    <div>
+                <div class="avatar">${EscapeHtml(GetAvatarText(comment.nickname))}</div>
+                <div class="comment-body">
+                    <div class="comment-head">
                         <p class="nickname">${EscapeHtml(comment.nickname)}</p>
-                        <p class="meta-line">
-                            ${comment.likeCount} thích · ${comment.replyCount} phản hồi
-                        </p>
+                        <span class="comment-index">#${comment.index}</span>
                     </div>
-                    <span class="comment-index">#${comment.index}</span>
+                    <p class="comment-text">${EscapeHtml(GetTranslatedText(comment))}</p>
+                    <p class="meta-line">
+                        ${comment.likeCount} thích · ${comment.replyCount} phản hồi
+                    </p>
+                    ${replyActionHtml}
+                    <div class="reply-slot">${repliesHtml}</div>
                 </div>
-                <div class="comment-columns">
-                    <section>
-                        <p class="column-label">Bản gốc</p>
-                        <p class="comment-text">${EscapeHtml(comment.text)}</p>
-                    </section>
-                    <section>
-                        <p class="column-label">Bản dịch</p>
-                        <p class="comment-text translated">${EscapeHtml(comment.translatedText || "")}</p>
-                    </section>
-                </div>
-                ${replyActionHtml}
-                <div class="reply-slot">${repliesHtml}</div>
             </article>
         `;
     }).join("");
@@ -150,10 +164,9 @@ function AppendLoadMoreButton()
 
 function RenderComments(payload)
 {
-    resultTitle.textContent = `Video ${payload.videoId || "không xác định"}`;
+    resultTitle.textContent = `Bình luận (${payload.topLevelCommentCount || payload.totalFetched || 0})`;
     const metaItems =
     [
-        `${payload.topLevelCommentCount || payload.totalFetched} comment cấp 1`,
         `Douyin báo ${payload.reportedCommentCount || payload.totalFetched} comment`,
         `Nguồn: ${payload.source}`,
     ];
@@ -429,17 +442,7 @@ commentList.addEventListener("click", async (event) =>
         {
             replySlot.innerHTML = `
                 <div class="reply-list">
-                    <p class="reply-title">Phản hồi</p>
-                    ${responseJson.replies.map((reply) =>
-                    {
-                        return `
-                            <div class="reply-card">
-                                <p class="reply-meta">${EscapeHtml(reply.nickname)} · ${reply.likeCount} thích</p>
-                                <p class="reply-text">${EscapeHtml(reply.text)}</p>
-                                <p class="reply-translation">${EscapeHtml(reply.translatedText || "")}</p>
-                            </div>
-                        `;
-                    }).join("")}
+                    ${RenderReplyItems(responseJson.replies)}
                 </div>
             `;
         }
