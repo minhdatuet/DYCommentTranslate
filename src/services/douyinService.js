@@ -1547,9 +1547,18 @@ async function FetchTopLevelCommentsViaSignedNodeApiAsync(cookies, cookieHeader,
             {
                 headers:
                 {
-                    accept: "application/json, text/plain, */*",
-                    cookie: cookieHeader,
-                    referer: refererUrl,
+                    "accept": "application/json, text/plain, */*",
+                    "accept-language": "vi-VN,vi;q=0.9,fr-FR;q=0.8,fr;q=0.7,en-US;q=0.6,en;q=0.5",
+                    "cache-control": "no-cache",
+                    "cookie": cookieHeader,
+                    "pragma": "no-cache",
+                    "referer": refererUrl,
+                    "sec-ch-ua": '"Google Chrome";v="124", "Chromium";v="124", "Not.A/Brand";v="24"',
+                    "sec-ch-ua-mobile": "?0",
+                    "sec-ch-ua-platform": '"Windows"',
+                    "sec-fetch-dest": "empty",
+                    "sec-fetch-mode": "cors",
+                    "sec-fetch-site": "same-origin",
                     "user-agent": CONTEXT_OPTIONS.userAgent,
                 },
                 signal: controller.signal,
@@ -2084,9 +2093,18 @@ async function FetchRepliesViaSignedNodeApiAsync(cookies, cookieHeader, videoId,
             {
                 headers:
                 {
-                    accept: "application/json, text/plain, */*",
-                    cookie: cookieHeader,
-                    referer: refererUrl,
+                    "accept": "application/json, text/plain, */*",
+                    "accept-language": "vi-VN,vi;q=0.9,fr-FR;q=0.8,fr;q=0.7,en-US;q=0.6,en;q=0.5",
+                    "cache-control": "no-cache",
+                    "cookie": cookieHeader,
+                    "pragma": "no-cache",
+                    "referer": refererUrl,
+                    "sec-ch-ua": '"Google Chrome";v="124", "Chromium";v="124", "Not.A/Brand";v="24"',
+                    "sec-ch-ua-mobile": "?0",
+                    "sec-ch-ua-platform": '"Windows"',
+                    "sec-fetch-dest": "empty",
+                    "sec-fetch-mode": "cors",
+                    "sec-fetch-site": "same-origin",
                     "user-agent": CONTEXT_OPTIONS.userAgent,
                 },
                 signal: controller.signal,
@@ -2669,9 +2687,10 @@ export class DouyinService
         await CloseUserLoginFlowAsync(flow);
     }
 
-    CreateUserSessionFromCookieText(cookieText)
+    CreateUserSessionFromCookieText(cookieText, templateUrl = "")
     {
         const parsedCookies = NormalizeUserCookies(ParseCookieRows(cookieText));
+        const normalizedTemplateUrl = String(templateUrl ?? "").trim();
 
         if (parsedCookies.length === 0)
         {
@@ -2685,6 +2704,18 @@ export class DouyinService
             origins: [],
         };
         const directApiState = BuildCurrentDirectApiState();
+
+        if (normalizedTemplateUrl)
+        {
+            if (normalizedTemplateUrl.includes(COMMENT_REPLY_LIST_PATH))
+            {
+                directApiState.replyApiTemplateUrl = normalizedTemplateUrl;
+            }
+            else if (normalizedTemplateUrl.includes(COMMENT_LIST_PATH))
+            {
+                directApiState.commentApiTemplateUrl = normalizedTemplateUrl;
+            }
+        }
         const authStatus = GetUserSessionAuthStatus(
             {
                 storageState,

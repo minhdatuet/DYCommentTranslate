@@ -245,9 +245,10 @@ app.post("/api/douyin/session", (request, response) =>
             ?? request.body?.cookieText
             ?? "",
         ).trim();
+        const templateUrl = String(request.body?.templateUrl ?? "").trim();
         const sessionPayload = storageState
             ? douyinService.CreateUserSessionFromStorageState(storageState)
-            : douyinService.CreateUserSessionFromCookieText(cookieText);
+            : douyinService.CreateUserSessionFromCookieText(cookieText, templateUrl);
         SaveUserSession(response, request, sessionPayload);
 
         response.json(

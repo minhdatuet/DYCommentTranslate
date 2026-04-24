@@ -12,6 +12,7 @@ const manualInstruction = document.getElementById("manualInstruction");
 const syncCookiesButton = document.getElementById("syncCookiesButton");
 const clearSessionButton = document.getElementById("clearSessionButton");
 const authStatusText = document.getElementById("authStatusText");
+const templateUrlInput = document.getElementById("templateUrl");
 
 const API_REQUEST_TIMEOUT_MS = 120000;
 const DEFAULT_COMMENT_LIMIT = 20;
@@ -135,12 +136,15 @@ async function FetchAuthStatus()
     return FetchJsonAsync("/api/douyin/auth-status");
 }
 
-async function SyncCookiesAsync(cookieText)
+async function SyncCookiesAsync(cookieText, templateUrl = "")
 {
     return FetchJsonAsync("/api/douyin/session", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ cookieHeader: cookieText }),
+        body: JSON.stringify({
+            cookieHeader: cookieText,
+            templateUrl: templateUrl
+        }),
     });
 }
 
@@ -172,8 +176,10 @@ cookieForm.addEventListener("submit", async (event) =>
     SetStatus("Đang kiểm tra cookie Douyin...", "loading");
     try
     {
-        const authStatus = await SyncCookiesAsync(cookieText);
+        const templateUrl = String(templateUrlInput?.value ?? "").trim();
+        const authStatus = await SyncCookiesAsync(cookieText, templateUrl);
         cookieTextInput.value = "";
+        if (templateUrlInput) templateUrlInput.value = "";
         SetAuthState(authStatus);
         SetStatus("Đã lưu phiên Douyin.", "success");
     }
