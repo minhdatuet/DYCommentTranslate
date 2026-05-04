@@ -77,10 +77,16 @@ export class HunyuanTranslator
 
             clearTimeout(timeoutId);
 
-            if (!response.ok) return null;
+            if (!response.ok)
+            {
+                const errorBody = await response.text();
+                console.error(`Hunyuan API Error (HTTP ${response.status}):`, errorBody);
+                return null;
+            }
 
             const data = await response.json();
             const result = data.choices?.[0]?.message?.content?.trim();
+            console.log("Hunyuan translation success:", result?.substring(0, 50));
             
             return result || null;
         }
