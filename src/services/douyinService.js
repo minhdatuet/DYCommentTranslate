@@ -1552,7 +1552,7 @@ async function FetchTopLevelCommentsViaSignedNodeApiAsync(cookies, cookieHeader,
                     "cache-control": "no-cache",
                     "cookie": cookieHeader,
                     "pragma": "no-cache",
-                    "referer": refererUrl,
+                    "referer": "https://www.douyin.com/",
                     "sec-ch-ua": '"Google Chrome";v="124", "Chromium";v="124", "Not.A/Brand";v="24"',
                     "sec-ch-ua-mobile": "?0",
                     "sec-ch-ua-platform": '"Windows"',
@@ -1568,6 +1568,9 @@ async function FetchTopLevelCommentsViaSignedNodeApiAsync(cookies, cookieHeader,
         {
             clearTimeout(timeoutId);
         }
+
+        console.log("Douyin Response Status:", response.status, response.statusText);
+        console.log("Douyin Response Headers:", JSON.stringify([...response.headers]));
 
         if (!response.ok)
         {
