@@ -7,6 +7,7 @@ import { DouyinService } from "./services/douyinService.js";
 import { GeminiTranslator } from "./services/geminiTranslator.js";
 import { OfflineTranslator } from "./services/offlineTranslator.js";
 import { StvTranslator } from "./services/stvTranslator.js";
+import { HunyuanTranslator } from "./services/hunyuanTranslator.js";
 import { TranslationService } from "./services/translationService.js";
 
 const USER_SESSION_COOKIE_NAME = "dyc_user_session";
@@ -18,7 +19,8 @@ const douyinService = new DouyinService();
 const offlineTranslator = new OfflineTranslator(config.offlineDictDir);
 const geminiTranslator = new GeminiTranslator();
 const stvTranslator = new StvTranslator();
-const translationService = new TranslationService(offlineTranslator, geminiTranslator, stvTranslator);
+const hunyuanTranslator = new HunyuanTranslator();
+const translationService = new TranslationService(offlineTranslator, geminiTranslator, stvTranslator, hunyuanTranslator);
 const userSessions = new Map();
 
 function DecodeStorageStateBase64(storageStateBase64)

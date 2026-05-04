@@ -3,12 +3,14 @@ export class TranslationService
     #offlineTranslator;
     #geminiTranslator;
     #stvTranslator;
+    #hunyuanTranslator;
 
-    constructor(offlineTranslator, geminiTranslator, stvTranslator)
+    constructor(offlineTranslator, geminiTranslator, stvTranslator, hunyuanTranslator)
     {
         this.#offlineTranslator = offlineTranslator;
         this.#geminiTranslator = geminiTranslator;
         this.#stvTranslator = stvTranslator;
+        this.#hunyuanTranslator = hunyuanTranslator;
     }
 
     async TranslateCommentsAsync(comments, mode)
@@ -33,7 +35,37 @@ export class TranslationService
             return this.#TranslateStvWithFallbackAsync(comments);
         }
 
+        if (mode === "hunyuan")
+        {
+            return this.#TranslateHunyuanWithFallbackAsync(comments);
+        }
+
         return this.#offlineTranslator.TranslateComments(comments);
+    }
+
+    /// Dịch bằng HY-MT model, câu nào lỗi thì fallback offline.
+    async #TranslateHunyuanWithFallbackAsync(comments)
+    {
+        const texts = comments.map((comment) => comment.text);
+        const results = await this.#hunyuanTranslator.TranslateBatchAsync(texts);
+
+        return comments.map((comment, index) =>
+        {
+            const translatedText = results[index];
+
+            if (translatedText)
+            {
+                return {
+                    ...comment,
+                    translatedText: translatedText,
+                };
+            }
+
+            return {
+                ...comment,
+                translatedText: this.#offlineTranslator.Translate(comment.text),
+            };
+        });
     }
 
     /// Dịch bằng API SangTacViet, câu nào lỗi thì fallback offline.

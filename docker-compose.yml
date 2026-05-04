@@ -7,7 +7,18 @@ services:
         env_file:
             - .env
         ports:
-            - "127.0.0.1:3000:3000"
+            - "3000:3000"
         volumes:
             - ./.cache:/app/.cache
             - ./dict:/app/dict:ro
+        environment:
+            - HUNYUAN_API_URL=http://model-server:8080/v1/chat/completions
+        depends_on:
+            - model-server
+
+    model-server:
+        image: ghcr.io/ggerganov/llama.cpp:server
+        restart: unless-stopped
+        volumes:
+            - ./models:/models
+        command: -m /models/hy-mt-1.5-1.8b.gguf --host 0.0.0.0 --port 8080 --ctx-size 2048 --n-gpu-layers 0
