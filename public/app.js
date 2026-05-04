@@ -62,21 +62,22 @@ function SetAuthState(authStatus)
         cookieForm.hidden = true;
         if (manualInstruction) manualInstruction.hidden = true;
         clearSessionButton.hidden = false;
+        SetCommentFormEnabled(true);
+        return;
     }
-    else if (hasUsableCookies)
+
+    if (hasUsableCookies)
     {
         authStatusText.textContent = "Cookie chưa đủ trạng thái đăng nhập để lấy reply.";
-        authActions.hidden = false;
-        clearSessionButton.hidden = true;
     }
     else
     {
-        authStatusText.textContent = "Chưa có cookie Douyin (chỉ có thể lấy comment, không lấy được reply).";
-        authActions.hidden = false;
-        clearSessionButton.hidden = true;
+        authStatusText.textContent = "Cần cookie Douyin đã đăng nhập trước khi tải comment.";
     }
 
-    SetCommentFormEnabled(true);
+    authActions.hidden = false;
+    clearSessionButton.hidden = true;
+    SetCommentFormEnabled(false);
 }
 
 function EscapeHtml(text)

@@ -1,10 +1,7 @@
 import fs from "node:fs";
 import path from "node:path";
 
-const chromium = {
-    launch: async () => { throw new Error("Playwright has been removed"); },
-    launchPersistentContext: async () => { throw new Error("Playwright has been removed"); }
-};
+import { chromium } from "playwright";
 
 import { config } from "../config.js";
 import { BuildSignedCommentListUrl, BuildSignedReplyListUrl, GenerateVerifyFp } from "./douyinRequestSigner.js";
@@ -93,41 +90,25 @@ const userLoginFlows = new Map();
 // - douyin.com/jingxuan?modal_id=<id>
 // - iesdouyin.com/share/video/<id>/
 // - v.douyin.com/<shortcode> (cần resolve redirect trước)
-function ExtractUrlFromText(text)
-{
-    const normalizedText = String(text ?? "").trim();
-    const urlPattern = /https?:\/\/(?:v\.|www\.|iesdouyin\.)douyin\.com\/[^\s?#]+/gi;
-    const match = urlPattern.exec(normalizedText);
-    return match ? match[0] : normalizedText;
-}
-
 function ExtractVideoId(videoUrl)
 {
-    const extractedUrl = ExtractUrlFromText(videoUrl);
-    try
+    const parsedUrl = new URL(videoUrl);
+    const modalId = parsedUrl.searchParams.get("modal_id");
+
+    if (modalId)
     {
-        const parsedUrl = new URL(extractedUrl);
-        const modalId = parsedUrl.searchParams.get("modal_id");
-
-        if (modalId)
-        {
-            return modalId;
-        }
-
-        const pathSegments = parsedUrl.pathname.split("/").filter(Boolean);
-        const videoSegmentIndex = pathSegments.indexOf("video");
-
-        if (videoSegmentIndex !== -1 && pathSegments[videoSegmentIndex + 1])
-        {
-            return pathSegments[videoSegmentIndex + 1];
-        }
-
-        return pathSegments.at(-1) ?? "";
+        return modalId;
     }
-    catch
+
+    const pathSegments = parsedUrl.pathname.split("/").filter(Boolean);
+    const videoSegmentIndex = pathSegments.indexOf("video");
+
+    if (videoSegmentIndex !== -1 && pathSegments[videoSegmentIndex + 1])
     {
-        return "";
+        return pathSegments[videoSegmentIndex + 1];
     }
+
+    return pathSegments.at(-1) ?? "";
 }
 
 // Resolve link ngắn v.douyin.com bằng cách follow redirect.
@@ -2740,9 +2721,9 @@ export class DouyinService
             syncedAt,
         );
 
-        if (!authStatus.hasUsableCookies)
+        if (!authStatus.isLoggedIn)
         {
-            throw new Error("Cookie Douyin không hợp lệ. Hãy copy lại và sync lại.");
+            throw new Error("Cookie chưa có trạng thái đăng nhập Douyin hợp lệ. Hãy đăng nhập Douyin rồi sync lại.");
         }
 
         return {
@@ -2936,22 +2917,17 @@ export class DouyinService
             throw new Error("Không trích được videoId từ link Douyin.");
         }
 
-        let effectiveCookies = storedCookies;
-        let effectiveCookieHeader = cookieHeader;
-
-        if (!authStatus.hasUsableCookies || !cookieHeader)
+        if (!authStatus.isLoggedIn || !cookieHeader)
         {
-            // Fallback sang guest cookies nế không có cookie người dùng.
-            effectiveCookies = await EnsureUsableCookiesAsync(canonicalVideoUrl);
-            effectiveCookieHeader = BuildCookieHeaderFromCookies(effectiveCookies);
+            throw new Error("Cần sync cookie Douyin đã đăng nhập trước khi lấy comment.");
         }
 
         try
         {
             const signedApiResult = await WithTimeoutAsync(
                 FetchTopLevelCommentsViaSignedNodeApiAsync(
-                    effectiveCookies,
-                    effectiveCookieHeader,
+                    storedCookies,
+                    cookieHeader,
                     videoId,
                     normalizedMaxComments,
                     startCursor,
@@ -2976,7 +2952,7 @@ export class DouyinService
                 replyStatus:
                 {
                     fetchedReplies: false,
-                    requiresLogin: !authStatus.isLoggedIn,
+                    requiresLogin: false,
                     blockedByVerification: false,
                     fetchedReplyCommentCount: 0,
                 },
@@ -2995,7 +2971,7 @@ export class DouyinService
             {
                 const directApiResult = await WithTimeoutAsync(
                     FetchTopLevelCommentsViaNodeApiAsync(
-                        effectiveCookieHeader,
+                        cookieHeader,
                         videoId,
                         normalizedMaxComments,
                         startCursor,
@@ -3021,7 +2997,7 @@ export class DouyinService
                 replyStatus:
                 {
                     fetchedReplies: false,
-                    requiresLogin: !authStatus.isLoggedIn,
+                    requiresLogin: false,
                     blockedByVerification: false,
                     fetchedReplyCommentCount: 0,
                 },
@@ -3038,68 +3014,7 @@ export class DouyinService
         }
 
         const directMsg = directTemplateErrorMessage ? ` | captured API (${directTemplateErrorMessage})` : "";
-        
-        // Fallback cuối cùng sang Playwright nếu cả 2 API trên đều thất bại.
-        try {
-            const context = await GetSharedContextAsync();
-            const page = await context.newPage();
-            const commentApiBootstrap = { value: "" };
-            const commentBootstrapResponseHandler = (response) => {
-                const url = response.url();
-                if (url.includes(COMMENT_REPLY_LIST_PATH)) {
-                    if (!GetConfiguredReplyApiTemplateUrl()) SaveReplyApiTemplateUrl(url);
-                    return;
-                }
-                if (commentApiBootstrap.value || !url.includes(COMMENT_LIST_PATH)) return;
-                commentApiBootstrap.value = url;
-                SaveCommentApiTemplateUrl(url);
-            };
-            page.on("response", commentBootstrapResponseHandler);
-
-            try {
-                await WithTimeoutAsync(
-                    page.goto(canonicalVideoUrl, { waitUntil: "domcontentloaded", timeout: 60000 }),
-                    COMMENT_STEP_TIMEOUT_MS,
-                    "Mở trang Douyin quá lâu (browser fallback)."
-                );
-                await WithTimeoutAsync(
-                    WaitForDouyinClientReadyAsync(page, commentApiBootstrap),
-                    COMMENT_STEP_TIMEOUT_MS,
-                    "Douyin tải client quá lâu (browser fallback)."
-                );
-
-                const topLevelResult = await WithTimeoutAsync(
-                    FetchTopLevelCommentsAsync(page, videoId, normalizedMaxComments, startCursor, commentApiBootstrap),
-                    GET_COMMENTS_TIMEOUT_MS,
-                    "Lấy comment từ Douyin bị quá thời gian chờ (browser fallback)."
-                );
-                
-                const normalizedComments = topLevelResult.comments.map((comment, index) => NormalizeTopLevelComment(comment, index));
-                
-                return {
-                    videoId,
-                    comments: normalizedComments,
-                    source: topLevelResult.source ?? "douyin-browser-fallback",
-                    topLevelCommentCount: normalizedComments.length,
-                    reportedCommentCount: topLevelResult.reportedTotal,
-                    nextCursor: topLevelResult.nextCursor,
-                    douyinHasMore: topLevelResult.douyinHasMore,
-                    replyStatus: {
-                        fetchedReplies: false,
-                        requiresLogin: !authStatus.isLoggedIn,
-                        blockedByVerification: false,
-                        fetchedReplyCommentCount: 0,
-                    },
-                    directApiState: BuildCurrentDirectApiState(),
-                    storageState: runtimeState.storageState,
-                };
-            } finally {
-                page.off("response", commentBootstrapResponseHandler);
-                await page.close().catch(() => null);
-            }
-        } catch (browserError) {
-            throw new Error(`Lấy comment thất bại: signed API (${signedApiErrorMessage})${directMsg} | browser (${browserError.message}).`);
-        }
+        throw new Error(`Lấy comment bằng cookie người dùng thất bại: signed API (${signedApiErrorMessage})${directMsg}.`);
     }
 
     async GetRepliesWithCookiesAsync(videoUrl, commentId, sessionData, maxReplies = 0)

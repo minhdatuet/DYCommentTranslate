@@ -155,26 +155,14 @@ function SaveUserSession(response, request, sessionPayload)
     SetUserSessionCookie(response, request, sessionId);
 }
 
-function RequireUserSession(request, response, strictlyLoggedIn = true)
+function RequireUserSession(request, response)
 {
     const session = GetUserSession(request);
     const authStatus = session
         ? douyinService.GetAuthStatusForSession(session, session.syncedAt)
         : BuildEmptyAuthStatus();
 
-    // Nếu yêu cầu không khắt khe (chỉ lấy comment) và không có session, cho phép đi tiếp với session rỗng
-    if (!strictlyLoggedIn && !session)
-    {
-        return {
-            isGuest: true,
-            directApiState: {},
-            cookies: [],
-        };
-    }
-
-    const isUsable = strictlyLoggedIn ? authStatus.isLoggedIn : authStatus.hasUsableCookies;
-
-    if (isUsable)
+    if (authStatus.isLoggedIn)
     {
         return session;
     }
@@ -182,9 +170,7 @@ function RequireUserSession(request, response, strictlyLoggedIn = true)
     response.status(401).json(
     {
         ok: false,
-        error: strictlyLoggedIn 
-            ? "Cần sync cookie Douyin đã đăng nhập để sử dụng tính năng này (ví dụ: lấy phản hồi)."
-            : "Cần sync cookie Douyin trước khi sử dụng.",
+        error: "Cần sync cookie Douyin đã đăng nhập trước khi sử dụng.",
         authStatus,
     });
     return null;
@@ -305,7 +291,7 @@ app.delete("/api/douyin/session", (request, response) =>
 
 app.post("/api/comments", async (request, response) =>
 {
-    const session = RequireUserSession(request, response, false);
+    const session = RequireUserSession(request, response);
 
     if (!session)
     {
