@@ -2920,17 +2920,22 @@ export class DouyinService
             throw new Error("Không trích được videoId từ link Douyin.");
         }
 
+        let effectiveCookies = storedCookies;
+        let effectiveCookieHeader = cookieHeader;
+
         if (!authStatus.hasUsableCookies || !cookieHeader)
         {
-            throw new Error("Cần sync cookie Douyin trước khi lấy comment.");
+            // Fallback sang guest cookies nế không có cookie người dùng.
+            effectiveCookies = await EnsureUsableCookiesAsync(canonicalVideoUrl);
+            effectiveCookieHeader = BuildCookieHeaderFromCookies(effectiveCookies);
         }
 
         try
         {
             const signedApiResult = await WithTimeoutAsync(
                 FetchTopLevelCommentsViaSignedNodeApiAsync(
-                    storedCookies,
-                    cookieHeader,
+                    effectiveCookies,
+                    effectiveCookieHeader,
                     videoId,
                     normalizedMaxComments,
                     startCursor,
@@ -2974,7 +2979,7 @@ export class DouyinService
             {
                 const directApiResult = await WithTimeoutAsync(
                     FetchTopLevelCommentsViaNodeApiAsync(
-                        cookieHeader,
+                        effectiveCookieHeader,
                         videoId,
                         normalizedMaxComments,
                         startCursor,
