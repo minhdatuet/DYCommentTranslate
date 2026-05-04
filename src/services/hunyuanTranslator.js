@@ -25,24 +25,33 @@ export class HunyuanTranslator
     async TranslateBatchAsync(texts)
     {
         const results = new Array(texts.length).fill(null);
-        
-        for (let i = 0; i < texts.length; i++)
+        const CHUNK_SIZE = 4; // Số lượng slot mặc định của llama-server
+
+        for (let i = 0; i < texts.length; i += CHUNK_SIZE)
         {
-            const text = texts[i]?.trim();
-            if (!text) continue;
-
-            if (this.#cache.has(text))
+            const chunk = texts.slice(i, i + CHUNK_SIZE);
+            const chunkPromises = chunk.map(async (text, index) =>
             {
-                results[i] = this.#cache.get(text);
-                continue;
-            }
+                const originalIndex = i + index;
+                const trimmedText = text?.trim();
+                
+                if (!trimmedText) return;
 
-            const translated = await this.#FetchTranslationAsync(text);
-            if (translated)
-            {
-                results[i] = translated;
-                this.#cache.set(text, translated);
-            }
+                if (this.#cache.has(trimmedText))
+                {
+                    results[originalIndex] = this.#cache.get(trimmedText);
+                    return;
+                }
+
+                const translated = await this.#FetchTranslationAsync(trimmedText);
+                if (translated)
+                {
+                    results[originalIndex] = translated;
+                    this.#cache.set(trimmedText, translated);
+                }
+            });
+
+            await Promise.all(chunkPromises);
         }
 
         return results;

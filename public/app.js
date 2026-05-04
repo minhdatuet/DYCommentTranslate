@@ -14,7 +14,7 @@ const clearSessionButton = document.getElementById("clearSessionButton");
 const authStatusText = document.getElementById("authStatusText");
 const templateUrlInput = document.getElementById("templateUrl");
 
-const API_REQUEST_TIMEOUT_MS = 120000;
+const API_REQUEST_TIMEOUT_MS = 300000; // 5 phút cho model dịch
 const DEFAULT_COMMENT_LIMIT = 20;
 
 let currentVideoUrl = "";
