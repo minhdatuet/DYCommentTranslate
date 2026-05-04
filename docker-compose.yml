@@ -17,7 +17,7 @@ services:
             - model-server
 
     model-server:
-        image: ghcr.io/ggerganov/llama.cpp:server
+        image: ghcr.io/ggml-org/llama.cpp:server
         restart: unless-stopped
         volumes:
             - ./models:/models
