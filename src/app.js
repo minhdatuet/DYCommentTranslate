@@ -162,6 +162,16 @@ function RequireUserSession(request, response, strictlyLoggedIn = true)
         ? douyinService.GetAuthStatusForSession(session, session.syncedAt)
         : BuildEmptyAuthStatus();
 
+    // Nếu yêu cầu không khắt khe (chỉ lấy comment) và không có session, cho phép đi tiếp với session rỗng
+    if (!strictlyLoggedIn && !session)
+    {
+        return {
+            isGuest: true,
+            directApiState: {},
+            cookies: [],
+        };
+    }
+
     const isUsable = strictlyLoggedIn ? authStatus.isLoggedIn : authStatus.hasUsableCookies;
 
     if (isUsable)

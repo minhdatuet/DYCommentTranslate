@@ -2976,7 +2976,7 @@ export class DouyinService
                 replyStatus:
                 {
                     fetchedReplies: false,
-                    requiresLogin: false,
+                    requiresLogin: !authStatus.isLoggedIn,
                     blockedByVerification: false,
                     fetchedReplyCommentCount: 0,
                 },
@@ -3021,7 +3021,7 @@ export class DouyinService
                 replyStatus:
                 {
                     fetchedReplies: false,
-                    requiresLogin: false,
+                    requiresLogin: !authStatus.isLoggedIn,
                     blockedByVerification: false,
                     fetchedReplyCommentCount: 0,
                 },
