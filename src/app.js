@@ -60,7 +60,7 @@ function ParseRequestCookies(cookieHeader)
 function BuildSessionCookie(sessionId, maxAgeSeconds, request)
 {
     const encodedSessionId = encodeURIComponent(sessionId);
-    const secureFlag = config.nodeEnv === "production" || request.secure ? "; Secure" : "";
+    const secureFlag = request.secure ? "; Secure" : "";
 
     return [
         `${USER_SESSION_COOKIE_NAME}=${encodedSessionId}`,
