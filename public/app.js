@@ -300,7 +300,18 @@ commentForm.addEventListener("submit", async (event) =>
 {
     event.preventDefault();
     const formData = new FormData(commentForm);
-    currentVideoUrl = String(formData.get("videoUrl")).trim();
+    const rawVideoUrl = String(formData.get("videoUrl")).trim();
+    
+    // Tự động trích xuất link từ văn bản copy
+    const urlPattern = /https?:\/\/(?:v\.|www\.|iesdouyin\.)douyin\.com\/[^\s?#]+/gi;
+    const match = urlPattern.exec(rawVideoUrl);
+    currentVideoUrl = match ? match[0] : rawVideoUrl;
+    
+    // Cập nhật lại ô nhập nếu cần để người dùng thấy link đã trích xuất
+    if (match) {
+        commentForm.elements.videoUrl.value = currentVideoUrl;
+    }
+
     currentTranslationMode = formData.get("translationMode");
     currentLimit = Number(formData.get("commentLimit")) || 20;
     submitButton.disabled = true;

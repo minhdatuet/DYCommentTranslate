@@ -93,25 +93,41 @@ const userLoginFlows = new Map();
 // - douyin.com/jingxuan?modal_id=<id>
 // - iesdouyin.com/share/video/<id>/
 // - v.douyin.com/<shortcode> (cần resolve redirect trước)
+function ExtractUrlFromText(text)
+{
+    const normalizedText = String(text ?? "").trim();
+    const urlPattern = /https?:\/\/(?:v\.|www\.|iesdouyin\.)douyin\.com\/[^\s?#]+/gi;
+    const match = urlPattern.exec(normalizedText);
+    return match ? match[0] : normalizedText;
+}
+
 function ExtractVideoId(videoUrl)
 {
-    const parsedUrl = new URL(videoUrl);
-    const modalId = parsedUrl.searchParams.get("modal_id");
-
-    if (modalId)
+    const extractedUrl = ExtractUrlFromText(videoUrl);
+    try
     {
-        return modalId;
+        const parsedUrl = new URL(extractedUrl);
+        const modalId = parsedUrl.searchParams.get("modal_id");
+
+        if (modalId)
+        {
+            return modalId;
+        }
+
+        const pathSegments = parsedUrl.pathname.split("/").filter(Boolean);
+        const videoSegmentIndex = pathSegments.indexOf("video");
+
+        if (videoSegmentIndex !== -1 && pathSegments[videoSegmentIndex + 1])
+        {
+            return pathSegments[videoSegmentIndex + 1];
+        }
+
+        return pathSegments.at(-1) ?? "";
     }
-
-    const pathSegments = parsedUrl.pathname.split("/").filter(Boolean);
-    const videoSegmentIndex = pathSegments.indexOf("video");
-
-    if (videoSegmentIndex !== -1 && pathSegments[videoSegmentIndex + 1])
+    catch
     {
-        return pathSegments[videoSegmentIndex + 1];
+        return "";
     }
-
-    return pathSegments.at(-1) ?? "";
 }
 
 // Resolve link ngắn v.douyin.com bằng cách follow redirect.
