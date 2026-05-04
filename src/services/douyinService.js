@@ -2920,10 +2920,7 @@ export class DouyinService
             throw new Error("Không trích được videoId từ link Douyin.");
         }
 
-        if (!authStatus.isLoggedIn || !cookieHeader)
-        {
-            throw new Error("Cần sync cookie Douyin đã đăng nhập trước khi lấy comment.");
-        }
+        // Không yêu cầu cookie đăng nhập đối với top-level comments (guest fallback)
 
         try
         {

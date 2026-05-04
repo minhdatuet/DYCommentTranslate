@@ -291,12 +291,7 @@ app.delete("/api/douyin/session", (request, response) =>
 
 app.post("/api/comments", async (request, response) =>
 {
-    const session = RequireUserSession(request, response);
-
-    if (!session)
-    {
-        return;
-    }
+    const session = GetUserSession(request);
 
     const videoUrl = String(request.body?.videoUrl ?? "").trim();
     const translationMode = String(request.body?.translationMode ?? "offline").trim().toLowerCase();

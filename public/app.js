@@ -72,12 +72,12 @@ function SetAuthState(authStatus)
     }
     else
     {
-        authStatusText.textContent = "Cần cookie Douyin đã đăng nhập trước khi tải comment.";
+        authStatusText.textContent = "Đang dùng tư cách Khách. Không lấy được reply.";
     }
 
     authActions.hidden = false;
     clearSessionButton.hidden = true;
-    SetCommentFormEnabled(false);
+    SetCommentFormEnabled(true);
 }
 
 function EscapeHtml(text)
@@ -303,9 +303,8 @@ commentForm.addEventListener("submit", async (event) =>
     const formData = new FormData(commentForm);
     const rawVideoUrl = String(formData.get("videoUrl")).trim();
     
-    // Tự động trích xuất link từ văn bản copy
-    const urlPattern = /https?:\/\/(?:v\.|www\.|iesdouyin\.)douyin\.com\/[^\s?#]+/gi;
-    const match = urlPattern.exec(rawVideoUrl);
+    // Tự động trích xuất link từ văn bản copy, giữ nguyên query parameters (ví dụ: modal_id)
+    const match = rawVideoUrl.match(/https?:\/\/(?:v\.|www\.|iesdouyin\.)douyin\.com\/(?:[a-zA-Z0-9-._~:\/?#[\]@!$&'()*+,;=]+)/i);
     currentVideoUrl = match ? match[0] : rawVideoUrl;
     
     // Cập nhật lại ô nhập nếu cần để người dùng thấy link đã trích xuất
