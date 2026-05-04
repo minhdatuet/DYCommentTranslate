@@ -64,7 +64,7 @@ const CONTEXT_OPTIONS =
         width: 1440,
         height: 1200,
     },
-    userAgent: "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36",
+    userAgent: "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36",
     locale: "zh-CN",
 };
 const AUTH_STATE_PATH = config.douyinAuthStatePath;
@@ -1568,7 +1568,8 @@ async function FetchTopLevelCommentsViaSignedNodeApiAsync(cookies, cookieHeader,
         {
             clearTimeout(timeoutId);
         }
-
+        
+        console.log("Cookie Header length:", (cookieHeader || "").length);
         console.log("Douyin Response Status:", response.status, response.statusText);
         console.log("Douyin Response Headers:", JSON.stringify([...response.headers]));
 
