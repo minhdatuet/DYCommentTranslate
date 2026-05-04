@@ -2724,9 +2724,9 @@ export class DouyinService
             syncedAt,
         );
 
-        if (!authStatus.isLoggedIn)
+        if (!authStatus.hasUsableCookies)
         {
-            throw new Error("Cookie chưa có trạng thái đăng nhập Douyin hợp lệ. Hãy đăng nhập Douyin rồi sync lại.");
+            throw new Error("Cookie Douyin không hợp lệ. Hãy copy lại và sync lại.");
         }
 
         return {
@@ -2920,9 +2920,9 @@ export class DouyinService
             throw new Error("Không trích được videoId từ link Douyin.");
         }
 
-        if (!authStatus.isLoggedIn || !cookieHeader)
+        if (!authStatus.hasUsableCookies || !cookieHeader)
         {
-            throw new Error("Cần sync cookie Douyin đã đăng nhập trước khi lấy comment.");
+            throw new Error("Cần sync cookie Douyin trước khi lấy comment.");
         }
 
         try
