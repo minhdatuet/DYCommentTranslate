@@ -19,6 +19,7 @@ export const config =
     douyinStorageStateBase64: String(process.env.DOUYIN_STORAGE_STATE_BASE64 ?? "").trim(),
     douyinAdminToken: String(process.env.DOUYIN_ADMIN_TOKEN ?? "").trim(),
     douyinDirectApiStatePath: path.resolve(".cache", "douyin-direct-api-state.json"),
+    douyinProductionSessionEnvPath: path.resolve(".cache", "douyin-production-session.env"),
     geminiApiKey: process.env.GEMINI_API_KEY ?? "",
     geminiModel: process.env.GEMINI_MODEL ?? "gemini-2.5-flash",
     stvApiUrl: process.env.STV_API_URL ?? DEFAULT_STV_API_URL,

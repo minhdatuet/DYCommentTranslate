@@ -70,6 +70,7 @@ const CONTEXT_OPTIONS =
 const AUTH_STATE_PATH = config.douyinAuthStatePath;
 const AUTH_USER_DATA_DIR = config.douyinAuthUserDataDir;
 const DIRECT_API_STATE_PATH = config.douyinDirectApiStatePath;
+const PRODUCTION_SESSION_ENV_PATH = config.douyinProductionSessionEnvPath;
 const REQUIRED_AUTH_COOKIE_NAMES = new Set([
     "passport_auth_status",
     "passport_auth_mix_state",
@@ -341,19 +342,62 @@ function BootstrapEnvironmentSession()
 
 function ReadDirectApiState()
 {
+    const fallbackState = ReadProductionSessionDirectApiState();
+
     if (!fs.existsSync(DIRECT_API_STATE_PATH))
+    {
+        return fallbackState;
+    }
+
+    try
+    {
+        return {
+            ...fallbackState,
+            ...JSON.parse(fs.readFileSync(DIRECT_API_STATE_PATH, "utf8")),
+        };
+    }
+    catch
+    {
+        return fallbackState;
+    }
+}
+
+function ReadProductionSessionDirectApiState()
+{
+    if (!fs.existsSync(PRODUCTION_SESSION_ENV_PATH))
     {
         return null;
     }
 
     try
     {
-        return JSON.parse(fs.readFileSync(DIRECT_API_STATE_PATH, "utf8"));
+        const envText = fs.readFileSync(PRODUCTION_SESSION_ENV_PATH, "utf8");
+        const commentApiTemplateUrl = ReadEnvLineValue(envText, "DOUYIN_COMMENT_API_TEMPLATE_URL");
+        const replyApiTemplateUrl = ReadEnvLineValue(envText, "DOUYIN_REPLY_API_TEMPLATE_URL");
+
+        if (!commentApiTemplateUrl && !replyApiTemplateUrl)
+        {
+            return null;
+        }
+
+        return {
+            commentApiTemplateUrl,
+            replyApiTemplateUrl,
+            updatedAt: fs.statSync(PRODUCTION_SESSION_ENV_PATH).mtime.toISOString(),
+        };
     }
     catch
     {
         return null;
     }
+}
+
+function ReadEnvLineValue(envText, key)
+{
+    const escapedKey = key.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+    const matchedLine = String(envText ?? "").match(new RegExp(`^${escapedKey}=(.*)$`, "m"));
+
+    return String(matchedLine?.[1] ?? "").trim();
 }
 
 function GetConfiguredCommentApiTemplateUrl()
