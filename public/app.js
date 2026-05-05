@@ -19,8 +19,8 @@ const modeNote = document.getElementById("modeNote");
 
 const API_REQUEST_TIMEOUT_MS = 300000; // 5 phút cho model dịch
 const DEFAULT_COMMENT_LIMIT = 20;
-const HUNYUAN_DEFAULT_LIMIT = 5;
-const HUNYUAN_MAX_LIMIT = 10;
+const HUNYUAN_DEFAULT_LIMIT = 3;
+const HUNYUAN_MAX_LIMIT = 3;
 const NORMAL_MAX_LIMIT = 100;
 
 let currentVideoUrl = "";

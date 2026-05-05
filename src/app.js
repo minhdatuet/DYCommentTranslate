@@ -13,9 +13,10 @@ import { TranslationService } from "./services/translationService.js";
 const USER_SESSION_COOKIE_NAME = "dyc_user_session";
 const USER_SESSION_TTL_MS = 12 * 60 * 60 * 1000;
 const DEFAULT_COMMENT_LIMIT = 20;
-// Mode hunyuan chạy CPU 2 core nên phải clamp để tránh người dùng đặt quá cao dẫn tới timeout.
-const HUNYUAN_MAX_LIMIT = 10;
-const HUNYUAN_DEFAULT_LIMIT = 5;
+// Mode hunyuan chạy CPU 2 core nên phải clamp rất chặt để 1 request dưới 30s
+// (proxy provider VPS có timeout ngắn). 3 comment / 1 batch / 1 request ≈ 22-25s.
+const HUNYUAN_MAX_LIMIT = 3;
+const HUNYUAN_DEFAULT_LIMIT = 3;
 
 const app = express();
 const douyinService = new DouyinService();

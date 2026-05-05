@@ -6,14 +6,15 @@ import { config } from "../config.js";
 // Timeout dài cho VPS CPU 2 core: prefill + decode 1 batch nhỏ vẫn có thể chạm ~60-90s.
 const REQUEST_TIMEOUT_MS = 120000;
 
-// Số comment gom vào 1 prompt duy nhất. Giảm số request → giảm overhead prefill/network.
-const BATCH_SIZE = 5;
+// Số comment gom vào 1 prompt duy nhất. Giữ nhỏ để 1 request luôn dưới ngưỡng
+// timeout của proxy provider VPS (~30s); decode CPU 2 core ~4.5 tok/s.
+const BATCH_SIZE = 3;
 
-// max_tokens căn theo độ dài input để model không sinh dốc dải.
-// 1 Hán tự ≈ 1 token, 1 token dịch tiếng Việt ≈ 2-3 token → nhân 4 + buffer.
-const MAX_TOKENS_PER_CHAR = 4;
-const MAX_TOKENS_MIN = 64;
-const MAX_TOKENS_CAP = 384;
+// max_tokens căn theo độ dài input để model không sinh dư.
+// 1 Hán tự ≈ 1 token, 1 token dịch tiếng Việt ≈ 2-3 token → nhân 3 + buffer nhỏ.
+const MAX_TOKENS_PER_CHAR = 3;
+const MAX_TOKENS_MIN = 48;
+const MAX_TOKENS_CAP = 160;
 
 // Sampling theo khuyến nghị HY-MT (xem D:\HY-MT\HY-MT\docs\INFERENCE_GUIDE.md).
 const SAMPLING_TEMPERATURE = 0.7;
@@ -25,7 +26,8 @@ const SAMPLING_REPETITION_PENALTY = 1.05;
 const STOP_SEQUENCES = ["\n\n\n", "注释：", "解释：", "说明：", "Note:", "Explanation:"];
 
 // System prompt cố định → tăng xác suất prompt cache hit ở llama.cpp giữa các request.
-const SYSTEM_PROMPT = "你是专业的中越翻译助手，只输出越南语译文，不输出任何解释、注释或原文。";
+// Yêu cầu model đức dịch ngắn gọn để giảm token output → giảm time CPU.
+const SYSTEM_PROMPT = "你是翻译机器，只输出越南语简短译文，绝不输出任何解释、标点、原文、标题或多余内容。每条译文控制在十五个字以内。";
 
 // Regex nhận dạng ký tự Hán (CJK Unified + Extension A). Comment không chứa Hán tự
 // (full Latin/emoji/số) thì không cần dịch → bỏ qua model, tiết kiệm thời gian.
