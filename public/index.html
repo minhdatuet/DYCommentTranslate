@@ -95,6 +95,10 @@
                     </select>
                 </label>
 
+                <p class="mode-note" id="modeNote" hidden>
+                    Hunyuan chạy CPU trên VPS 2 core. Mỗi lần nên chọn tối đa 10 comment để tránh timeout. Câu nào model dịch không được sẽ tự fallback sang SangTacViet rồi Offline.
+                </p>
+
                 <label class="field-block" for="commentLimit">
                     <span>Mỗi lần tải</span>
                     <input
@@ -103,7 +107,7 @@
                         type="number"
                         min="1"
                         max="100"
-                        value="20"
+                        value="5"
                     />
                 </label>
 

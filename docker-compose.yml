@@ -13,12 +13,41 @@ services:
             - ./dict:/app/dict:ro
         environment:
             - HUNYUAN_API_URL=http://model-server:8080/v1/chat/completions
+            - NODE_ENV=production
         depends_on:
             - model-server
+        # Web app Node nhẹ, chỉ cần ~256-512MB.
+        mem_limit: 512m
+        memswap_limit: 768m
 
     model-server:
         image: ghcr.io/ggml-org/llama.cpp:server
         restart: unless-stopped
         volumes:
             - ./models:/models
-        command: -m /models/hy-mt-1.5-1.8b.gguf --host 0.0.0.0 --port 8080 --ctx-size 2048 --n-gpu-layers 0
+        # Tối ưu cho VPS 2 core / 4GB / không GPU:
+        # - threads = 2 đúng số core, tránh oversubscribe.
+        # - parallel 1 + cont-batching: xử lý tuần tự nhưng pipeline tốt.
+        # - ctx-size 1024 đủ cho prompt batch 5 comment + output.
+        # - mlock ghim weights trong RAM, tránh swap.
+        # - cache-type-k/v q8_0 quantize KV cache, giảm ~50% RAM cho KV cache.
+        command: >
+            -m /models/hy-mt-1.5-1.8b.gguf
+            --host 0.0.0.0
+            --port 8080
+            --ctx-size 1024
+            --n-gpu-layers 0
+            --threads 2
+            --threads-batch 2
+            --batch-size 256
+            --ubatch-size 256
+            --parallel 1
+            --cont-batching
+            --mlock
+            --cache-type-k q8_0
+            --cache-type-v q8_0
+        ulimits:
+            memlock: -1
+        # Dành khoảng 3GB cho model-server (1.1GB weights + KV cache + overhead).
+        mem_limit: 3g
+        memswap_limit: 3g

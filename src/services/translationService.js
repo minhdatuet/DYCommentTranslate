@@ -43,22 +43,51 @@ export class TranslationService
         return this.#offlineTranslator.TranslateComments(comments);
     }
 
-    /// Dịch bằng HY-MT model, câu nào lỗi thì fallback offline.
+    /// Pipeline 3 tầng cho mode hunyuan: Hunyuan → STV → Offline.
+    /// Câu nào Hunyuan trả null sẽ thu gom vào 1 batch STV duy nhất, còn lại fallback offline.
     async #TranslateHunyuanWithFallbackAsync(comments)
     {
         const texts = comments.map((comment) => comment.text);
-        const results = await this.#hunyuanTranslator.TranslateBatchAsync(texts);
+        const hunyuanResults = await this.#hunyuanTranslator.TranslateBatchAsync(texts);
+
+        const stvPendingIndices = [];
+        const stvPendingTexts = [];
+
+        for (let index = 0; index < hunyuanResults.length; index += 1)
+        {
+            if (hunyuanResults[index]) continue;
+
+            const originalText = comments[index]?.text;
+            if (!originalText?.trim()) continue;
+
+            stvPendingIndices.push(index);
+            stvPendingTexts.push(originalText);
+        }
+
+        let stvResults = [];
+        if (stvPendingTexts.length > 0)
+        {
+            stvResults = await this.#stvTranslator.TranslateBatchAsync(stvPendingTexts);
+        }
+
+        const stvByOriginalIndex = new Map();
+        for (let i = 0; i < stvPendingIndices.length; i += 1)
+        {
+            stvByOriginalIndex.set(stvPendingIndices[i], stvResults[i]);
+        }
 
         return comments.map((comment, index) =>
         {
-            const translatedText = results[index];
-
-            if (translatedText)
+            const fromHunyuan = hunyuanResults[index];
+            if (fromHunyuan)
             {
-                return {
-                    ...comment,
-                    translatedText: translatedText,
-                };
+                return { ...comment, translatedText: fromHunyuan };
+            }
+
+            const fromStv = stvByOriginalIndex.get(index);
+            if (fromStv)
+            {
+                return { ...comment, translatedText: fromStv };
             }
 
             return {

@@ -25,7 +25,9 @@ if not exist "bin\model-server\llama-server.exe" (
 
 echo [2/3] Dang khoi dong Model Server (Background)...
 :: Su dung tham so toi uu cho CPU (AVX2)
-start "DY-Model-Server" /min "bin\model-server\llama-server.exe" -m "models\hy-mt-1.5-1.8b.gguf" --port 8021 --ctx-size 2048 --n-gpu-layers 0 --threads 8
+:: --parallel 1 + --cont-batching: phu hop voi web hien gui prompt batching tuan tu
+:: --cache-type-k/v q8_0: giam RAM cho KV cache
+start "DY-Model-Server" /min "bin\model-server\llama-server.exe" -m "models\hy-mt-1.5-1.8b.gguf" --port 8021 --ctx-size 1024 --n-gpu-layers 0 --threads 4 --threads-batch 4 --batch-size 256 --ubatch-size 256 --parallel 1 --cont-batching --mlock --cache-type-k q8_0 --cache-type-v q8_0
 
 echo.
 echo Dang cho Model Server khoi tao (khoang 5 giay)...

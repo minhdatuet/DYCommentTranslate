@@ -13,6 +13,9 @@ import { TranslationService } from "./services/translationService.js";
 const USER_SESSION_COOKIE_NAME = "dyc_user_session";
 const USER_SESSION_TTL_MS = 12 * 60 * 60 * 1000;
 const DEFAULT_COMMENT_LIMIT = 20;
+// Mode hunyuan chạy CPU 2 core nên phải clamp để tránh người dùng đặt quá cao dẫn tới timeout.
+const HUNYUAN_MAX_LIMIT = 10;
+const HUNYUAN_DEFAULT_LIMIT = 5;
 
 const app = express();
 const douyinService = new DouyinService();
@@ -176,8 +179,14 @@ function RequireUserSession(request, response)
     return null;
 }
 
-function NormalizeLimit(rawLimit)
+function NormalizeLimit(rawLimit, mode)
 {
+    if (mode === "hunyuan")
+    {
+        const limit = Number(rawLimit) || HUNYUAN_DEFAULT_LIMIT;
+        return Math.max(1, Math.min(HUNYUAN_MAX_LIMIT, limit));
+    }
+
     const limit = Number(rawLimit) || DEFAULT_COMMENT_LIMIT;
     return Math.max(1, Math.min(100, limit));
 }
@@ -295,7 +304,7 @@ app.post("/api/comments", async (request, response) =>
 
     const videoUrl = String(request.body?.videoUrl ?? "").trim();
     const translationMode = String(request.body?.translationMode ?? "offline").trim().toLowerCase();
-    const limit = NormalizeLimit(request.body?.limit);
+    const limit = NormalizeLimit(request.body?.limit, translationMode);
     const cursor = NormalizeCursor(request.body?.cursor);
     const indexOffset = Number(request.body?.indexOffset) || 0;
 
@@ -434,4 +443,14 @@ app.post("/api/comment-replies", async (request, response) =>
 app.listen(config.port, () =>
 {
     console.log(`DYComment đang chạy tại http://localhost:${config.port}`);
+
+    // Warmup model server: load weights vào RAM trước khi user gọi request đầu tiên.
+    // Fire-and-forget để không chặn start; nếu model-server chưa sẵn sàng sẽ retry lần gọi sau.
+    if (hunyuanTranslator.IsConfigured)
+    {
+        setTimeout(() =>
+        {
+            hunyuanTranslator.WarmupAsync().catch(() => {});
+        }, 5000);
+    }
 });

@@ -13,9 +13,15 @@ const syncCookiesButton = document.getElementById("syncCookiesButton");
 const clearSessionButton = document.getElementById("clearSessionButton");
 const authStatusText = document.getElementById("authStatusText");
 const templateUrlInput = document.getElementById("templateUrl");
+const translationModeSelect = document.getElementById("translationMode");
+const commentLimitInput = document.getElementById("commentLimit");
+const modeNote = document.getElementById("modeNote");
 
 const API_REQUEST_TIMEOUT_MS = 300000; // 5 phút cho model dịch
 const DEFAULT_COMMENT_LIMIT = 20;
+const HUNYUAN_DEFAULT_LIMIT = 5;
+const HUNYUAN_MAX_LIMIT = 10;
+const NORMAL_MAX_LIMIT = 100;
 
 let currentVideoUrl = "";
 let currentTranslationMode = "";
@@ -339,6 +345,38 @@ commentForm.addEventListener("submit", async (event) =>
         submitButton.disabled = false;
     }
 });
+
+function ApplyTranslationModeUiConstraints()
+{
+    if (!commentLimitInput || !translationModeSelect) return;
+
+    const mode = translationModeSelect.value;
+    const isHunyuan = mode === "hunyuan";
+
+    if (modeNote) modeNote.hidden = !isHunyuan;
+
+    if (isHunyuan)
+    {
+        commentLimitInput.max = String(HUNYUAN_MAX_LIMIT);
+        const current = Number(commentLimitInput.value) || 0;
+        if (current < 1 || current > HUNYUAN_MAX_LIMIT)
+        {
+            commentLimitInput.value = String(HUNYUAN_DEFAULT_LIMIT);
+        }
+    }
+    else
+    {
+        commentLimitInput.max = String(NORMAL_MAX_LIMIT);
+        const current = Number(commentLimitInput.value) || 0;
+        if (current < 1)
+        {
+            commentLimitInput.value = String(DEFAULT_COMMENT_LIMIT);
+        }
+    }
+}
+
+translationModeSelect?.addEventListener("change", ApplyTranslationModeUiConstraints);
+ApplyTranslationModeUiConstraints();
 
 (async () => {
     try {
